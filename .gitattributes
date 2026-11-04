@@ -1,2 +1,5 @@
 # Unified-diff context and signed upstream inputs must remain byte-exact.
 kernel/*.patch -whitespace
+
+# Preserve unified-diff context in the portable patch series.
+improvements/**/*.patch -whitespace
