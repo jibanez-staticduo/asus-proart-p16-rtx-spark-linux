@@ -1,0 +1,50 @@
+{
+  "format": 1,
+  "reference_upstream": {
+    "repository": "https://github.com/johannhartmann/asus-proart-p16-rtx-spark-linux",
+    "commit": "93e0d2286888a69f31eca8f5b243005c9b293535"
+  },
+  "kernel": {
+    "release": "7.3",
+    "release_url": "https://cdn.kernel.org/pub/linux/kernel/v7.x/linux-7.3.tar.xz",
+    "release_sha256": "87363c24f10e06321eb362765521094e94471f6bff8bce2d6b3e40f39f004953",
+    "patch_repository": "https://github.com/jibanez-staticduo/omarchy-pkgs",
+    "patch_commit": "c596e1f8ce4e91d576e6edbe0f4b85058b8bafbd",
+    "patch_path": "pkgbuilds/linux-omarchy-aarch64",
+    "files_copied_without_modification": true,
+    "config_reference": "config.aarch64 from the same commit",
+    "base_platform_provenance": "NVIDIA Ubuntu-nvidia-7.0-7.0.0-1021.21 SAUCE and source notices in patches",
+    "coordinated_port": {
+      "repository": "https://github.com/NVIDIA/NV-Kernels",
+      "pr": 586,
+      "commit": "2562f5f1d1cecfd2047d3810d4bf5626366f1d32",
+      "related_prs": [
+        599,
+        601
+      ],
+      "adaptation": "Consolidated Linux7.3 port, P16 automatic firmware admission and suspend-only policy; not a new upstream sign-off"
+    },
+    "patch_count": 83,
+    "adaptation_note": "The exported subset omits unrelated scheduler, x86 and Qualcomm changes from the reference distro. Use olddefconfig; no full rebuild of this compact subset is claimed."
+  },
+  "telemetry": {
+    "repository": "https://github.com/johannhartmann/spark_hwmon",
+    "commit": "ef94faace8a44380e8ba8c8bd8cffd185c82af67",
+    "patch": "telemetry/0001-p16-platform-and-bios-support.patch",
+    "adaptation": "Linux7.3 platform-driver binding, exact P16 DMI on any BIOS and validated MMIO fallback; source notices retained"
+  },
+  "validation": {
+    "physical_hardware": "ASUS ProArt P16 H7607BA NVIDIA N1X AArch64",
+    "bios": "H7607BA.303",
+    "record": "VALIDATION.md",
+    "export": "Kernel series clean-applied and source harnesses tested; no separate full build of compact vanilla series claimed"
+  },
+  "audio": {
+    "base_file": "audio/mt8901-acp-sdw-legacy-mach.c",
+    "base_sha256": "1136655fcf885059e1f6c9e2184d9e6335c84f9fd9203e9adb10431fd3d0d2fc",
+    "base_provenance": "The mt8901 legacy SoundWire machine driver created by the pinned kernel prerequisites; MediaTek authors and GPL source notices retained",
+    "patch": "audio/route-h7607ba.patch",
+    "adaptation": "Four CS42L43 Speaker DAPM routes guarded by exact ASUS/H7607BA DMI and NVDA6210 ACPI presence",
+    "oem_tuning_redistributed": false
+  }
+}
