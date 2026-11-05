@@ -96,6 +96,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--module", type=Path, help="explicit reviewed candidate; defaults to installed DKMS module")
+    parser.add_argument("--installed", action="store_true", help="use only installed provider and firmware artifacts")
     args = parser.parse_args()
     if os.geteuid():
         parser.error("Run as root via sudo or pkexec")
@@ -107,7 +108,8 @@ def main():
     firmware = module("platform_firmware", "prepare-dsp-firmware.py")
     late = module("platform_late", "install-scp.py")
     live.check_target()
-    expected_provider = run(["modinfo", "-F", "srcversion", LAB / "npu/driver/n1x_npu_bootstrap.ko"]).strip()
+    provider_module = "n1x_npu_bootstrap" if args.installed else LAB / "npu/driver/n1x_npu_bootstrap.ko"
+    expected_provider = run(["modinfo", "-F", "srcversion", provider_module]).strip()
     npu = provider.snapshot()
     if npu.get("module_srcversion") != expected_provider or \
             npu.get("status", {}).get("task_verified") != "1" or \
@@ -124,7 +126,8 @@ def main():
     images = {}
     pins = {name: digest for name, digest in firmware.IMAGES.values()}
     for _, name, image_id in TARGETS:
-        data = (LAB / "platform/firmware" / name).read_bytes()
+        firmware_root = Path("/usr/lib/firmware/nvidia/n1x") if args.installed else LAB / "platform/firmware"
+        data = (firmware_root / name).read_bytes()
         if hashlib.sha256(data).hexdigest() != pins[name]:
             parser.error("Unverified firmware: " + name)
         firmware.inspect_image(data, image_id)

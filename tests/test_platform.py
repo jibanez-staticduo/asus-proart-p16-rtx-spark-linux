@@ -30,7 +30,6 @@ sensor_install = module("sensor_install", "install-sensorhub.py")
 dsp_live = module("dsp_live", "validate-dsp-live.py")
 provider_live = module("provider_live", "validate-sroot-provider.py")
 dsp_boot = module("dsp_boot", "validate-dsp-boot.py")
-provider_start = module("provider_start", "../platform/dsp/provider/n1x-platform-npu-start")
 platform_audit = module("platform_audit", "verify-platform-install.py")
 
 
@@ -129,7 +128,7 @@ class SCPRefreshTests(unittest.TestCase):
 class ProviderBootServiceTests(unittest.TestCase):
     def layout(self, root):
         controls = []
-        for index, (name, supplier) in enumerate(provider_start.EXPECTED_IOMMU.items()):
+        for index, (name, supplier) in enumerate((("NVDA200A:00", "smmu3.0x0000000035000000"), ("NVDA8600:00", "smmu3.0x0000000014900000"))):
             device = root / "bus/platform/devices" / name
             device.mkdir(parents=True)
             iommu = root / supplier
@@ -149,17 +148,33 @@ class ProviderBootServiceTests(unittest.TestCase):
             controls = self.layout(root)
             extra = controls[1].parent / "devices/another-device"
             extra.symlink_to(root / "another-device")
-            with self.assertRaisesRegex(RuntimeError, "shared"):
-                provider_start.prepare(root)
+            result = self.run_helper(root, "--prepare")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("shared", result.stderr)
             self.assertTrue(all(p.read_text().strip() == "identity" for p in controls))
             extra.unlink()
-            provider_start.prepare(root)
+            result = self.run_helper(root, "--prepare")
+            self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(all(p.read_text().strip() == "DMA" for p in controls))
 
-    def test_recovery_and_unqualified_kernels_are_skipped_before_firmware_access(self):
-        for release in ("7.2.8-23-omarchy-p16-asus", "7.3.0-7-omarchy", "unknown"):
-            with self.subTest(release=release), self.assertRaisesRegex(RuntimeError, "Unqualified NPU kernel"):
-                provider_start.check_host(Path("/nonexistent"), release, Path("/nonexistent"))
+    def run_helper(self, root, mode):
+        dmi = root / "class/dmi/id"
+        dmi.mkdir(parents=True, exist_ok=True)
+        for key, value in (("sys_vendor", "ASUS"), ("product_name", "ProArt P16 H7607BA"), ("bios_version", "H7607BA.300")):
+            (dmi / key).write_text(value + "\n")
+        # Replace literal sysfs paths in a test-only copy; the installed helper
+        # deliberately has no environment override for hardware access.
+        script = (ROOT / "platform/dsp/provider/n1x-platform-npu-start").read_text()
+        script = script.replace("/sys/", str(root) + "/")
+        return subprocess.run(["bash", "-c", script, "test-helper", mode], text=True, capture_output=True)
+
+    def test_host_check_has_no_kernel_version_allowlist(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = self.run_helper(Path(directory), "--check-host")
+            self.assertEqual(result.returncode, 0, result.stderr)
+        script = (ROOT / "platform/dsp/provider/n1x-platform-npu-start").read_text()
+        self.assertNotIn("uname", script)
+        self.assertNotIn("python", script)
 
     def test_partially_bound_endpoints_prevent_domain_changes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -167,9 +182,90 @@ class ProviderBootServiceTests(unittest.TestCase):
             controls = self.layout(root)
             driver = root / "bus/platform/devices/NVDA200A:00/driver"
             driver.mkdir()
-            with self.assertRaisesRegex(RuntimeError, "Partially bound"):
-                provider_start.prepare(root)
+            result = self.run_helper(root, "--prepare")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Partially bound", result.stderr)
             self.assertTrue(all(p.read_text().strip() == "identity" for p in controls))
+
+
+class ManagedKernelHookTests(unittest.TestCase):
+    def test_new_kernel_and_late_firmware_targets_preserve_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            modules = root / "modules"
+            packages = ("linux-omarchy", "linux-p16-asus-23", "linux-rtx-spark-npu", "linux-p16-platform-25")
+            for package in packages:
+                target = modules / package
+                target.mkdir(parents=True)
+                (target / "pkgbase").write_text(package)
+            menu = root / "limine.conf"
+            menu.write_text("".join("comment: kernel-id=" + p + " \n" for p in packages[:-1]))
+            commands = root / "bin"
+            commands.mkdir()
+            pacman = commands / "pacman"
+            pacman.write_text('#!/usr/bin/bash\nif [[ $1 == -Qqo ]]; then cat "${2%/*}/pkgbase"; fi\n')
+            pacman.chmod(0o755)
+            firmware = root / "firmware/nvidia"
+            firmware.mkdir(parents=True)
+            script = (ROOT / "scripts/p16-mkinitcpio-managed").read_text()
+            script = script.replace("[[ $EUID == 0 ]]", "true")
+            script = script.replace("PATH=/usr/bin:/bin", "PATH=" + str(commands) + ":/usr/bin:/bin")
+            script = script.replace("/boot/limine.conf", str(menu)).replace("/usr/lib/modules/", str(modules) + "/")
+            for targets in (str(firmware) + "\nusr/lib/firmware/nvidia/n1x/sroot-v0.bin\n",
+                            str(modules / packages[-1] / "modules.builtin") + "\n"):
+                # Keep target matching realistic; only the backing sysfs-like
+                # file paths and command lookup differ in this isolated copy.
+                if "modules.builtin" in targets:
+                    targets = targets.replace(str(modules) + "/", "usr/lib/modules/")
+                result = subprocess.run(["bash", "-c", script, "test", "--plan"], input=targets, text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), "Rebuilding managed Limine kernels: linux-p16-platform-25")
+            (modules / packages[-1]).rename(modules / "linux-p16-platform")
+            (modules / "linux-p16-platform/pkgbase").write_text("linux-p16-platform")
+            result = subprocess.run(["bash", "-c", script, "test", "--plan"],
+                                    input="usr/lib/firmware/nvidia/n1x/sroot-v0.bin\n", text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "Rebuilding managed Limine kernels: linux-p16-platform")
+
+
+class BootFailureRecoveryTests(unittest.TestCase):
+    def test_failed_candidate_still_selects_hashed_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            images = root / "EFI/Linux"
+            images.mkdir(parents=True)
+            recovery = images / "omarchy_linux-rtx-spark-npu.efi"
+            recovery.write_bytes(b"working recovery")
+            candidate = images / "omarchy_linux-p16-platform.efi"
+            candidate.write_bytes(b"incomplete update")
+            pin = hashlib.blake2b(recovery.read_bytes()).hexdigest()
+            bad = hashlib.blake2b(b"previous candidate").hexdigest()
+            menu = root / "limine.conf"
+            menu.write_text("default_entry: Omarchy/linux-p16-platform\ntimeout: 5\n"
+                            "//linux-p16-platform\npath: boot():/EFI/Linux/omarchy_linux-p16-platform.efi#" + bad +
+                            "\n//linux-rtx-spark-npu\npath: boot():/EFI/Linux/omarchy_linux-rtx-spark-npu.efi#" + pin + "\n")
+            script = (ROOT / "scripts/p16-boot-menu-policy").read_text()
+            script = script.replace("/run/lock/boot-partition.lock", str(root / "lock"))
+            script = script.replace("[[ $EUID == 0 ]]", "true").replace("/boot", str(root))
+            script = script.replace("/usr/local/sbin/p16-platform-update-check", "/usr/bin/false")
+            result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("hash mismatch", result.stderr)
+            self.assertIn("default_entry: Omarchy/linux-rtx-spark-npu", menu.read_text())
+
+
+class ACPICapabilityTests(unittest.TestCase):
+    def test_only_strong_target_allocator_enables_override(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "future-kernel/build"
+            target.mkdir(parents=True)
+            script = (ROOT / "config/zz-p16-hardware-fixes.conf").read_text()
+            script = script.replace("/usr/lib/modules/", str(root) + "/")
+            for symbol, expected in (("W", "0"), ("T", "1")):
+                (target / "System.map").write_text("0000000000000000 " + symbol + " arch_alloc_acpi_tables\n")
+                result = subprocess.check_output(["bash", "-c", "KERNELVERSION=future-kernel; HOOKS=(); MODULES=(); " + script + '\necho "${#HOOKS[@]}"'], text=True)
+                self.assertEqual(result.strip(), expected)
 
 
 class DSPBootTrialTests(unittest.TestCase):

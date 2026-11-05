@@ -1,0 +1,29 @@
+[Unit]
+Description=Initialize the P16 NPU and shared SROOT provider
+Documentation=https://github.com/johannhartmann/n1x-npu-linux
+After=systemd-modules-load.service sys-kernel-debug.mount
+Requires=sys-kernel-debug.mount
+Before=multi-user.target
+ConditionPathExists=/sys/bus/platform/devices/NVDA200A:00
+ConditionPathExists=/sys/bus/platform/devices/NVDA8600:00
+
+[Service]
+Type=oneshot
+ExecCondition=/usr/libexec/n1x-platform-npu-start --check-host
+ExecStartPre=/usr/libexec/n1x-platform-npu-start --prepare
+ExecStart=/usr/bin/modprobe n1x_npu_bootstrap
+ExecStartPost=/usr/libexec/n1x-platform-npu-start --verify
+ExecStop=/usr/bin/modprobe -r n1x_npu_bootstrap
+RemainAfterExit=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=no
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

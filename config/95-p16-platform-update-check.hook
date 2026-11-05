@@ -1,0 +1,14 @@
+[Trigger]
+Type = Path
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Target = usr/lib/modules/*/modules.builtin
+Target = usr/lib/modules/*/build/include/*
+Target = usr/src/*/dkms.conf
+Target = usr/lib/firmware/nvidia/n1x/*
+
+[Action]
+Description = Checking P16 kernel capabilities, DKMS modules and embedded sensor transport...
+When = PostTransaction
+Exec = /usr/local/sbin/p16-platform-update-check --all

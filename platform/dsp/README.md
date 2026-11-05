@@ -78,9 +78,10 @@ images there with `scripts/prepare-dsp-firmware.py --dest platform/dsp/firmware`
 
 `scripts/prepare-sroot-provider.py` snapshots the reviewed sibling NPU driver
 and headers into a hash-pinned DKMS recipe under `platform/dsp/provider`.
-That package provides rebuilds for installed/future kernels, saves overridden
-module files through DKMS, and adds a drop-in to the existing NPU service.
-The service gates startup to BIOS 300 and the current/default P16 NPU kernels,
-selects isolated DMA domains before modprobe, and verifies firmware readiness.
-The base recovery kernel is excluded. Removing this provider package restores
-the original module files via DKMS and removes its service drop-in/blacklist.
+That package provides standard DKMS rebuilds for installed/future kernels and
+owns `n1x-platform-npu.service` plus a small Bash startup helper. It checks BIOS
+300, selects isolated DMA domains before modprobe, and verifies driver readiness.
+The native driver validates hardware/firmware; there is no kernel-version
+allowlist. Enable the new unit and disable the old `n1x-npu.service` without
+stopping a published experiment. Normal startup leaves DSP firmware boot disabled.
+See `docs/update-safe.md` for the kernel packaging and pacman/mkinitcpio flow.

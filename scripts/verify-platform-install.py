@@ -18,7 +18,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = ("n1x-scp-dkms", "n1x-pluton-dkms", "n1x-sensorhub-dkms", "n1x-adsp-dkms",
-            "n1x-sroot-provider-dkms", "n1x-adsp-firmware-local")
+            "n1x-sroot-provider-dkms", "n1x-adsp-firmware-local", "n1x-sroot-firmware-local")
 
 
 def load(name, filename):
@@ -87,11 +87,13 @@ def main():
     try:
         report["packages"] = run(["pacman", "-Q", *PACKAGES]).splitlines()
         report["dkms"] = run(["dkms", "status"])
+        service = "n1x-platform-npu.service" if Path("/usr/lib/systemd/system/n1x-platform-npu.service").exists() else "n1x-npu.service"
+        report["npu_service_name"] = service
         if args.start_npu_service:
-            run(["systemctl", "start", "n1x-npu.service"], timeout=60)
+            run(["systemctl", "start", service], timeout=60)
         if args.refresh_scp:
             refresh_scp(report)
-        report["npu_service"] = run(["systemctl", "show", "n1x-npu.service",
+        report["npu_service"] = run(["systemctl", "show", service,
                                      "-p", "ActiveState", "-p", "Result", "-p", "ConditionResult"])
         if "ActiveState=active" not in report["npu_service"] or "Result=success" not in report["npu_service"]:
             raise RuntimeError("NPU boot service did not start successfully")

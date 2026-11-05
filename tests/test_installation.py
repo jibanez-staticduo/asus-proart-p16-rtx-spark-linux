@@ -43,9 +43,9 @@ class MenuTests(unittest.TestCase):
         pin = hashlib.blake2b((self.images / name).read_bytes()).hexdigest()
         return '  path: boot():/EFI/Linux/' + name + '#' + pin + '\n'
 
-    def verify(self, extra, options='quiet: no\ntimeout: 10\n'):
+    def verify(self, extra, options='quiet: no\ntimeout: 5\n'):
         self.config.write_text(options + self.entry('stock.efi') + extra)
-        boot.verify_menu(self.config, self.root)
+        boot.verify_menu(self.config, self.root, installed_npu=False)
 
     def test_valid_stock_and_p16(self):
         self.verify(self.entry('omarchy_linux-p16-asus-23.efi'))

@@ -102,11 +102,16 @@ def main():
                         raise RuntimeError("DKMS installation not confirmed: " + module + " / " + release)
             if provider:
                 subprocess.run(["systemctl", "daemon-reload"], check=True)
-                subprocess.run(["systemd-analyze", "verify", "/usr/lib/systemd/system/n1x-npu.service"], check=True,
+                subprocess.run(["systemd-analyze", "verify", "/usr/lib/systemd/system/n1x-platform-npu.service"], check=True,
+                               capture_output=True, text=True)
+                subprocess.run(["systemctl", "disable", "n1x-npu.service"], check=True,
+                               capture_output=True, text=True)
+                subprocess.run(["systemctl", "enable", "n1x-platform-npu.service"], check=True,
                                capture_output=True, text=True)
                 subprocess.run(["/usr/libexec/n1x-platform-npu-start", "--prepare"], check=True,
                                capture_output=True, text=True)
                 receipt["provider_service_verified_without_restart"] = True
+                receipt["npu_service"] = "n1x-platform-npu.service"
         except Exception as error:
             receipt["postflight_error"] = str(error)
     if args.report:

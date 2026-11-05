@@ -1,0 +1,74 @@
+#!/usr/bin/bash
+# Post-DKMS checks for managed P16 kernels; never resets or loads hardware.
+set -euo pipefail
+export PATH=/usr/bin:/bin
+fail() { echo "P16 update check: $*" >&2; exit 1; }
+release= image= all=false
+while (($#)); do
+    case $1 in
+        --all) all=true; shift ;;
+        --release) release=${2:?}; shift 2 ;;
+        --image) image=${2:?}; shift 2 ;;
+        *) fail 'Usage: p16-platform-update-check --all|--release RELEASE|--image UKI [--release RELEASE]' ;;
+    esac
+done
+if $all; then
+    for base in /usr/lib/modules/*/pkgbase; do
+        [[ $(<"$base") == linux-p16-platform || $(<"$base") == linux-p16-platform-* ]] || continue
+        "$0" --release "$(basename "${base%/pkgbase}")" --image "/boot/EFI/Linux/omarchy_$(<"$base").efi"
+    done
+    exit 0
+fi
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+if [[ $image ]]; then
+    [[ -s $image ]] || fail "Missing UKI: $image"
+    objcopy --dump-section .uname="$tmp/uname" --dump-section .linux="$tmp/linux" \
+        --dump-section .initrd="$tmp/initrd" "$image" "$tmp/discard.efi"
+    embedded=$(tr -d '\000\n' < "$tmp/uname")
+    [[ -z $release || $release == "$embedded" ]] || fail "UKI release mismatch: $embedded"
+    release=$embedded
+fi
+[[ $release =~ ^[a-zA-Z0-9._+-]+$ ]] || fail 'Invalid kernel release'
+modules=/usr/lib/modules/$release
+[[ -s $modules/pkgbase && ( $(<"$modules/pkgbase") == linux-p16-platform || $(<"$modules/pkgbase") == linux-p16-platform-* ) ]] || fail 'Unmanaged P16 kernel'
+[[ $(pacman -Qqo "$modules/vmlinuz") == "$(<"$modules/pkgbase")" ]] || fail 'Kernel package owner mismatch'
+grep -q ' T arch_alloc_acpi_tables$' "$modules/build/System.map" || fail 'Missing ARM64 ACPI allocation fix'
+for option in CONFIG_ACPI_TABLE_UPGRADE=y CONFIG_ASUS_WMI=m CONFIG_ASUS_NB_WMI=m CONFIG_SPI_HID_ACPI=m; do
+    grep -Fxq "$option" "$modules/build/.config" || fail "Missing $option"
+done
+for name in n1x_scp n1x_pluton spi_hid spi_hid_acpi n1x_adsp n1x_npu_bootstrap nvidia nvidia_drm spbm; do
+    path=$(modinfo -k "$release" -n "$name")
+    [[ -s $path ]] || fail "Missing $name"
+    [[ $(modinfo -k "$release" -F vermagic "$name") == "$release "* ]] || fail "Wrong ABI: $name"
+    modprobe -S "$release" --show-depends "$name" > "$tmp/deps"
+    while read -r action dependency rest; do
+        [[ $action != insmod || -s $dependency ]] || fail "Missing dependency: $dependency"
+    done < "$tmp/deps"
+    case $name in nvidia|nvidia_drm|spbm) ;; *) [[ $path == */updates/dkms/* ]] || fail "DKMS override missing: $name" ;; esac
+done
+userspace=$(pacman -Q nvidia-utils)
+userspace=${userspace#* }; userspace=${userspace%-*}
+[[ $(modinfo -k "$release" -F version nvidia) == "$userspace" ]] || fail 'NVIDIA kernel/userspace version mismatch'
+if [[ $image ]]; then
+    cmp -n "$(stat -c %s "$modules/vmlinuz")" "$modules/vmlinuz" "$tmp/linux" || fail 'UKI contains a different kernel'
+    mkdir "$tmp/tree"
+    (cd "$tmp/tree"; lsinitcpio -x "$tmp/initrd" > /dev/null)
+    for table in DSDT SSDT; do
+        cmp "/etc/initcpio/p16-acpi/$table.aml" "$tmp/tree/kernel/firmware/acpi/$table.aml" || fail "Wrong early $table override"
+    done
+    for name in spi_hid spi_hid_acpi; do
+        installed=$(modinfo -k "$release" -n "$name")
+        file=${installed##*/}; stem=${file%%.ko*}
+        mapfile -t embedded < <(find "$tmp/tree/usr/lib/modules/$release" -type f -name "$stem.ko*")
+        [[ ${#embedded[@]} == 1 ]] || fail "Expected one embedded $name"
+        unpack() { case $1 in *.zst) zstd -dq -c "$1" ;; *.xz) xz -dc "$1" ;; *.gz) gzip -dc "$1" ;; *) cat "$1" ;; esac; }
+        unpack "$installed" > "$tmp/installed.ko"
+        unpack "${embedded[0]}" > "$tmp/embedded.ko"
+        cmp "$tmp/installed.ko" "$tmp/embedded.ko" || fail "UKI has stale $name"
+    done
+    if find "$tmp/tree" -name 'n1x_npu_bootstrap.ko*' -o -name 'n1x_adsp.ko*' | grep -q .; then
+        fail 'NPU/DSP must load after IOMMU preparation, outside initramfs'
+    fi
+fi
+echo "P16 kernel, DKMS dependencies${image:+ and UKI payload} valid: $release"

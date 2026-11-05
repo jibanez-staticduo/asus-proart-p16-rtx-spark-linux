@@ -38,7 +38,7 @@ def main():
     archive_path = DEST / "npu-source.tar.gz"
     archive_path.write_bytes(gzip.compress(tar_data.getvalue(), mtime=0))
     sources = ("npu-source.tar.gz", "dkms.conf", "n1x-sroot-provider.conf",
-               "20-p16-sroot-provider.conf", "n1x-platform-npu-start")
+               "n1x-platform-npu.service", "n1x-platform-npu-start")
     sums = [hashlib.sha256((DEST / name).read_bytes()).hexdigest() for name in sources]
     template = (DEST / "PKGBUILD.in").read_text()
     (DEST / "PKGBUILD").write_text(template.replace("SOURCE_SHA256", "\n            ".join("'" + s + "'" for s in sums)))

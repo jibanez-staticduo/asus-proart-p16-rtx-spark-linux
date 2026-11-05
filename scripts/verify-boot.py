@@ -40,7 +40,15 @@ def verify_image(path):
     release = sec['.uname'].rstrip(b'\x00\n').decode()
     package = QUALIFIED_KERNELS.get(release)
     if package is None:
-        raise ValueError('Nicht qualifizierter Kernelrelease im UKI: ' + release)
+        if not re.fullmatch(r'[a-zA-Z0-9._+-]+', release):
+            raise ValueError('Nicht qualifizierter Kernelrelease im UKI: ' + release)
+        try:
+            package = subprocess.check_output(
+                ['pacman', '-Qoq', '/usr/lib/modules/' + release + '/vmlinuz'], text=True).strip()
+        except subprocess.CalledProcessError as error:
+            raise ValueError('Nicht qualifizierter Kernelrelease im UKI: ' + release) from error
+        if package != 'linux-p16-platform' and not package.startswith('linux-p16-platform-'):
+            raise ValueError('Kein paketierter P16-Kernel: ' + package)
     modules = Path('/usr/lib/modules') / release
     symbols = (modules / 'build/System.map').read_text()
     if not re.search(' T arch_alloc_acpi_tables$', symbols, re.M):
@@ -98,7 +106,7 @@ def verify_image(path):
         raise ValueError(f'Kernelimage gehört {owner}, erwartet wurde {package}')
     print('UKI, ACPI-Overrides und Modulabhängigkeiten gültig:', path)
 
-def verify_menu(config_path=Path('/boot/limine.conf'), boot_root=Path('/boot')):
+def verify_menu(config_path=Path('/boot/limine.conf'), boot_root=Path('/boot'), installed_npu=None):
     config = config_path.read_text()
     entries = []
     for line in config.splitlines():
@@ -117,7 +125,20 @@ def verify_menu(config_path=Path('/boot/limine.conf'), boot_root=Path('/boot')):
             entries.append(path)
     if '/EFI/Linux/omarchy_linux-p16-asus-23.efi' not in entries:
         raise ValueError('P16-Eintrag fehlt im Limine-Menü')
-    for key, expected in [('quiet', 'no'), ('timeout', '10')]:
+    npu_image = '/EFI/Linux/omarchy_linux-rtx-spark-npu.efi'
+    if installed_npu is None:
+        installed_npu = subprocess.run(['pacman', '-Qq', 'linux-rtx-spark-npu'],
+                                       capture_output=True).returncode == 0
+    if installed_npu:
+        if npu_image not in entries:
+            raise ValueError('Installierter RTX-Spark-NPU-Kernel fehlt im Limine-Menü')
+        defaults = re.findall(r'^default_entry:\s*(.*?)\s*$', config, re.M)
+        if defaults != ['Omarchy/linux-rtx-spark-npu']:
+            if len(defaults) != 1 or not re.fullmatch(r'Omarchy/linux-p16-[a-z0-9-]+', defaults[0]):
+                raise ValueError('Kein qualifizierter P16-NPU-Default im Limine-Menü')
+            image = boot_root / ('EFI/Linux/omarchy_' + defaults[0].split('/', 1)[1] + '.efi')
+            verify_image(image)
+    for key, expected in [('quiet', 'no'), ('timeout', '5')]:
         values = re.findall(r'^' + key + r':\s*(.*?)\s*$', config, re.M)
         if values != [expected]:
             raise ValueError('Limine benötigt genau einmal ' + key + ': ' + expected)
