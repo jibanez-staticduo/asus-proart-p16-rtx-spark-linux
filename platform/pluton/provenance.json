@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "target": {
+    "product": "ProArt P16 H7607BA",
+    "bios": "H7607BA.300",
+    "acpi_hid": "NVDA8601",
+    "acpi_hrv": 1
+  },
+  "evidence": {
+    "driver": "Microsoft PlutonNv.sys",
+    "version": "10.0.28000.3365",
+    "sha256": "c3e67ea741188fb77d814d2d94ecfe2c136dae8e393ae58f7725e502053910ac",
+    "url": "https://msdl.microsoft.com/download/symbols/plutonnv.sys/B413455114000/plutonnv.sys",
+    "analysis": "static analysis with public PDB; Windows driver never executed",
+    "functions": {
+      "mailbox_init": "InitHwRot @ 0x1400036e8",
+      "boot_status": "NvMailboxGetBootStatus @ 0x140003b88",
+      "response": "NvMailboxGetResponse @ 0x140003bd0",
+      "safety_echo": "NvMailboxCheckSafetyFifo @ 0x1400038c8",
+      "header": "NvMailboxPackHeaderOld @ 0x140003fc8",
+      "request": "NvMailboxSendRequestOld @ 0x140004288",
+      "read": "PfiChannelReadOld @ 0x140004748",
+      "write": "PfiChannelWriteOld @ 0x140004a10",
+      "channels": "PfiGetChannelStatus @ 0x140004b60",
+      "rpc": "NvPcbiSubmitRequest @ 0x1400027b0"
+    }
+  },
+  "scope": {
+    "register_base": "0x18020000",
+    "register_bytes": 4096,
+    "register_stride": 16,
+    "transport_enabled_by_default": false,
+    "firmware_load_supported": false,
+    "hardware_transport_validation": "2026-11-05: PFI channel discovery succeeded; channel IDs 1 and 2 write-ready; no new kernel errors",
+    "pcbi_service_integration": "pending",
+    "mapped_register_subrange": "0x18020010..0x180200d3; excludes the stride-metadata alias"
+  }
+}

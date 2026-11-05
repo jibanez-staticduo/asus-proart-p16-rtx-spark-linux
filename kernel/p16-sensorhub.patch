@@ -1,0 +1,238 @@
+--- a/drivers/hid/spi-hid/spi-hid-acpi.c
++++ b/drivers/hid/spi-hid/spi-hid-acpi.c
+@@ -185,7 +185,15 @@
+ 							struct spi_hid_acpi_config,
+ 							ops);
+ 
+-	return device_reset(&conf->adev->dev);
++	acpi_status status;
++
++	/* An acpi_device's struct device is not its physical SPI companion.
++	 * device_reset(&adev->dev) therefore has no ACPI_HANDLE and never runs
++	 * the already-validated _RST method. Use the namespace handle directly.
++	 */
++	status = acpi_evaluate_object(acpi_device_handle(conf->adev), "_RST", NULL, NULL);
++	dev_info(&conf->adev->dev, "sensorhub _RST: %s\n", acpi_format_exception(status));
++	return ACPI_FAILURE(status) ? -EIO : 0;
+ }
+ 
+ static void spi_hid_acpi_sleep_minimal_reset_delay(struct spihid_ops *ops)
+--- a/drivers/hid/spi-hid/spi-hid-core.c
++++ b/drivers/hid/spi-hid/spi-hid-core.c
+@@ -20,11 +20,13 @@
+  *  Copyright (c) 2006-2010 Jiri Kosina
+  */
+ 
++#include <linux/acpi.h>
+ #include <linux/bitfield.h>
+ #include <linux/cache.h>
+ #include <linux/completion.h>
+ #include <linux/crc32.h>
+ #include <linux/device.h>
++#include <linux/dmi.h>
+ #include <linux/dmaengine.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/err.h>
+@@ -594,13 +596,11 @@
+ 	return __spi_hid_send_output_report(shid, report);
+ }
+ 
+-static int spi_hid_sync_request(struct spi_hid *shid,
++static int __spi_hid_sync_request(struct spi_hid *shid,
+ 				struct spi_hid_output_report *report)
+ {
+ 	struct device *dev = &shid->spi->dev;
+ 	int error;
+-
+-	guard(mutex)(&shid->output_lock);
+ 
+ 	reinit_completion(&shid->output_done);
+ 
+@@ -618,6 +618,13 @@
+ 		return error;
+ 
+ 	return 0;
++}
++
++static int spi_hid_sync_request(struct spi_hid *shid,
++				struct spi_hid_output_report *report)
++{
++	guard(mutex)(&shid->output_lock);
++	return __spi_hid_sync_request(shid, report);
+ }
+ 
+ /*
+@@ -697,7 +704,8 @@
+ 		dev_err(&shid->spi->dev, "Unexpected response report\n");
+ 	} else {
+ 		if (body->input_report_type == REPORT_DESCRIPTOR_RESPONSE ||
+-		    body->input_report_type == GET_FEATURE_RESPONSE) {
++		    body->input_report_type == GET_FEATURE_RESPONSE ||
++		    body->input_report_type == GET_INPUT_REPORT_RESPONSE) {
+ 			memcpy(shid->response->body, shid->input->body,
+ 			       sizeof(shid->input->body));
+ 			memcpy(shid->response->content, shid->input->content,
+@@ -939,15 +947,14 @@
+ 		}
+ 		fallthrough;
+ 	case GET_FEATURE_RESPONSE:
++	case GET_INPUT_REPORT_RESPONSE:
+ 	case SET_FEATURE_RESPONSE:
+ 	case REPORT_DESCRIPTOR_RESPONSE:
+ 		spi_hid_response_handler(shid, &body);
+ 		break;
+ 	/*
+-	 * FIXME: sending GET_INPUT and COMMAND reports not supported, thus
+-	 * throw away responses to those, they should never come.
++	 * Sending COMMAND reports is not supported.
+ 	 */
+-	case GET_INPUT_REPORT_RESPONSE:
+ 	case COMMAND_RESPONSE:
+ 		dev_err(dev, "Not a supported report type: 0x%x\n",
+ 			body.input_report_type);
+@@ -992,7 +999,8 @@
+ 	return 0;
+ }
+ 
+-static int spi_hid_get_request(struct spi_hid *shid, u8 content_id)
++static int spi_hid_get_request(struct spi_hid *shid, u8 content_id, u8 rtype,
++			       u8 *buffer, size_t length)
+ {
+ 	struct device *dev = &shid->spi->dev;
+ 	struct spi_hid_output_report report = {
+@@ -1002,8 +1010,28 @@
+ 		.content = NULL,
+ 	};
+ 	int error;
+-
+-	error = spi_hid_sync_request(shid, &report);
++	size_t content_len;
++	u8 expected;
++
++	if (shid->input_stream_only && rtype == HID_INPUT_REPORT)
++		return -EOPNOTSUPP;
++	if (rtype == HID_FEATURE_REPORT) {
++		expected = GET_FEATURE_RESPONSE;
++	} else if (rtype == HID_INPUT_REPORT) {
++		report.report_type = GET_INPUT_REPORT;
++		expected = GET_INPUT_REPORT_RESPONSE;
++	} else {
++		return -EOPNOTSUPP;
++	}
++	if (!length)
++		return -EINVAL;
++
++	/* Keep the matching response private until it has been copied. Other
++	 * feature/input requests must not replace it between completion/copy.
++	 */
++	guard(mutex)(&shid->output_lock);
++
++	error = __spi_hid_sync_request(shid, &report);
+ 	if (error) {
+ 		dev_err(dev,
+ 			"Expected get request response not received! Error %d\n",
+@@ -1013,7 +1041,13 @@
+ 		return error;
+ 	}
+ 
+-	return 0;
++	if (shid->response->body[0] != expected ||
++	    shid->response->body[3] != content_id)
++		return -EPROTO;
++	content_len = min_t(size_t, length - 1, shid->response_length);
++	buffer[0] = content_id;
++	memcpy(buffer + 1, shid->response->content, content_len);
++	return content_len + 1;
+ }
+ 
+ static int spi_hid_set_request(struct spi_hid *shid, u8 *arg_buf, u16 arg_len,
+@@ -1308,7 +1342,6 @@
+ 	struct spi_hid *shid = spi_get_drvdata(spi);
+ 	struct device *dev = &spi->dev;
+ 	int ret;
+-	size_t content_len;
+ 
+ 	if (!len)
+ 		return -EINVAL;
+@@ -1330,24 +1363,7 @@
+ 		ret = len;
+ 		break;
+ 	case HID_REQ_GET_REPORT:
+-		ret = spi_hid_get_request(shid, reportnum);
+-		if (ret) {
+-			dev_err(dev, "failed to get report\n");
+-			return ret;
+-		}
+-
+-		if (shid->response->body[3] != reportnum) {
+-			dev_err(dev,
+-				"get report id mismatch: expected 0x%02x, got 0x%02x\n",
+-				reportnum, shid->response->body[3]);
+-			return -EPROTO;
+-		}
+-
+-		/* Leave room for the report ID at buf[0]. */
+-		content_len = min_t(size_t, len - 1, shid->response_length);
+-		buf[0] = reportnum;
+-		memcpy(buf + 1, shid->response->content, content_len);
+-		ret = content_len + 1;
++		ret = spi_hid_get_request(shid, reportnum, rtype, buf, len);
+ 		break;
+ 	default:
+ 		dev_err(dev, "invalid request type\n");
+@@ -1392,6 +1408,27 @@
+ 	return len;
+ }
+ 
++static void spi_hid_ll_request(struct hid_device *hid, struct hid_report *report,
++			       int reqtype)
++{
++	struct spi_device *spi = hid->driver_data;
++	struct spi_hid *shid = spi_get_drvdata(spi);
++	int ret;
++
++	/* SCP 2.0.8.0 routes GET_INPUT to the VEML3328 task, but that task
++	 * implements only feature commands and asynchronous data reports. The
++	 * HID sensor hub has already armed its pending-read completion; its
++	 * next DATA report supplies the real sample. Never substitute feature
++	 * configuration bytes or repeatedly reset the firmware on a timeout.
++	 */
++	if (shid->input_stream_only && reqtype == HID_REQ_GET_REPORT &&
++	    report->type == HID_INPUT_REPORT)
++		return;
++	ret = __hid_request(hid, report, reqtype);
++	if (ret < 0)
++		hid_dbg(hid, "SPI HID request failed: %d\n", ret);
++}
++
+ static struct hid_ll_driver spi_hid_ll_driver = {
+ 	.start = spi_hid_ll_start,
+ 	.stop = spi_hid_ll_stop,
+@@ -1401,6 +1438,7 @@
+ 	.parse = spi_hid_ll_parse,
+ 	.output_report = spi_hid_ll_output_report,
+ 	.raw_request = spi_hid_ll_raw_request,
++	.request = spi_hid_ll_request,
+ };
+ 
+ static ssize_t bus_error_count_show(struct device *dev,
+@@ -1570,6 +1608,9 @@
+ 	shid->power_state = HIDSPI_ON;
+ 	shid->ops = ops;
+ 	shid->conf = conf;
++	shid->input_stream_only = dmi_match(DMI_PRODUCT_NAME, "ProArt P16 H7607BA") &&
++		ACPI_COMPANION(dev) &&
++		acpi_dev_hid_uid_match(ACPI_COMPANION(dev), "MSFW1111", NULL);
+ 	set_bit(SPI_HID_RESET_PENDING, &shid->flags);
+ 	shid->is_panel_follower = drm_is_panel_follower(&spi->dev);
+ 
+--- a/drivers/hid/spi-hid/spi-hid-core.h
++++ b/drivers/hid/spi-hid/spi-hid-core.h
+@@ -44,6 +44,7 @@
+ 
+ /* Driver context */
+ struct spi_hid {
++	bool input_stream_only;
+ 	struct spi_device	*spi;	/* spi device. */
+ 	struct hid_device	*hid;	/* pointer to corresponding HID dev. */
+ 

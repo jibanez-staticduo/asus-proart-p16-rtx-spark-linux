@@ -1,0 +1,540 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/* N1X ROT1 mailbox/PFI transport. PCBI service integration is work in progress.
+ * Protocol evidence: Microsoft PlutonNv.sys 10.0.28000.3365, SHA256
+ * c3e67ea741188fb77d814d2d94ecfe2c136dae8e393ae58f7725e502053910ac.
+ * The working FF-A TPM and NVDA8600/SROOT are separate devices; neither is
+ * claimed, reset, nor mapped here. No reserved security DRAM is exposed.
+ */
+#include <linux/acpi.h>
+#include <linux/capability.h>
+#include <linux/compat.h>
+#include <linux/delay.h>
+#include <linux/dmi.h>
+#include <linux/fs.h>
+#include <linux/io.h>
+#include <linux/iopoll.h>
+#include <linux/jiffies.h>
+#include <linux/kref.h>
+#include <linux/miscdevice.h>
+#include <linux/module.h>
+#include <linux/mutex.h>
+#include <linux/platform_device.h>
+#include <linux/pm.h>
+#include <linux/slab.h>
+#include <linux/uaccess.h>
+#include <linux/unaligned.h>
+#include <linux/vmalloc.h>
+
+#include "n1x_pluton_protocol.h"
+#include "n1x_pluton_uapi.h"
+
+#define N1X_ROT_IN_DATA 0x10
+#define N1X_ROT_READY 0x20
+#define N1X_ROT_IN_CONTROL 0x30
+#define N1X_ROT_OUT_DATA 0x40
+#define N1X_ROT_OUT_STATUS 0x50
+#define N1X_ROT_OUT_ACK 0x60
+#define N1X_ROT_SAFETY_DATA 0x70
+#define N1X_ROT_SAFETY_STATUS 0x80
+#define N1X_ROT_SAFETY_ACK 0x90
+#define N1X_ROT_BOOT_STATUS 0xa0
+#define N1X_ROT_ERROR_STATUS 0xb0
+#define N1X_ROT_ERROR_CLEAR0 0xc0
+#define N1X_ROT_ERROR_CLEAR1 0xd0
+#define N1X_PFI_BUSY 4
+
+static bool enable_transport;
+module_param(enable_transport, bool, 0400);
+MODULE_PARM_DESC(enable_transport, "Enable PFI mailbox transactions; disabled until explicitly requested");
+
+struct n1x_pluton {
+	struct kref reference;
+	struct mutex lock;
+	struct miscdevice misc;
+	void __iomem *regs;
+	u32 last_pfi_status;
+	bool initialized;
+	bool poisoned;
+	bool removed;
+	bool suspended;
+};
+
+/* Resource 1 aliases register zero as stride metadata. Claim only the
+ * actual mailbox registers at base+0x10..0xd3, as the working SROOT driver
+ * does for its distinct device. Never request the metadata alias or DRAM.
+ */
+static void __iomem *n1x_rot_reg(struct n1x_pluton *p, unsigned int offset)
+{
+	return p->regs + (offset - N1X_ROT_IN_DATA);
+}
+
+static int n1x_rot_wait(struct n1x_pluton *p, unsigned int reg, unsigned long deadline)
+{
+	u32 value;
+	unsigned long remaining;
+
+	if (time_after_eq(jiffies, deadline))
+		return -ETIMEDOUT;
+	remaining = jiffies_to_usecs(deadline - jiffies);
+	return readl_poll_timeout(n1x_rot_reg(p, reg), value, value & BIT(0), 1000, remaining);
+}
+
+static int n1x_rot_flush(struct n1x_pluton *p, unsigned int status, unsigned int ack)
+{
+	int limit;
+
+	for (limit = 0; limit < 64; limit++) {
+		if (!(ioread32(n1x_rot_reg(p, status)) & BIT(0)))
+			return 0;
+		iowrite32(1, n1x_rot_reg(p, ack));
+		usleep_range(1000, 1500);
+	}
+	return -EBUSY;
+}
+
+static int n1x_rot_init(struct n1x_pluton *p, unsigned long deadline)
+{
+	int ret;
+
+	if (p->removed || p->suspended)
+		return -ENODEV;
+	if (!enable_transport)
+		return -EOPNOTSUPP;
+	if (p->poisoned)
+		return -ENOTRECOVERABLE;
+	if (p->initialized)
+		return 0;
+	/* InitHwRot at VA 1400036e8: initialize only this host mailbox and
+	 * acknowledge its stale FIFOs. This does not reset the security CPU.
+	 */
+	iowrite32(~0U, n1x_rot_reg(p, N1X_ROT_ERROR_CLEAR0));
+	iowrite32(~0U, n1x_rot_reg(p, N1X_ROT_ERROR_CLEAR1));
+	iowrite32(3, n1x_rot_reg(p, N1X_ROT_IN_CONTROL));
+	ret = n1x_rot_flush(p, N1X_ROT_OUT_STATUS, N1X_ROT_OUT_ACK);
+	if (!ret)
+		ret = n1x_rot_flush(p, N1X_ROT_SAFETY_STATUS, N1X_ROT_SAFETY_ACK);
+	if (!ret)
+		ret = n1x_rot_wait(p, N1X_ROT_READY, deadline);
+	if (!ret && (ioread32(n1x_rot_reg(p, N1X_ROT_ERROR_STATUS)) & 0xff))
+		ret = -EIO;
+	if (!ret)
+		p->initialized = true;
+	else
+		p->poisoned = true;
+	return ret;
+}
+
+static int n1x_rot_message(struct n1x_pluton *p, const u8 *message, size_t length,
+			    u8 *reply, unsigned long deadline)
+{
+	u32 header, value;
+	size_t offset;
+	int ret;
+
+	if (!length || length > 60)
+		return -EMSGSIZE;
+	ret = n1x_rot_wait(p, N1X_ROT_READY, deadline);
+	if (ret)
+		goto poison;
+	/* PfiPlatSendOld at VA 140003038 uses command 0x3f, zero routing
+	 * fields, and a word-count header. The max PFI packet is 52 bytes.
+	 */
+	header = 0x3f | (DIV_ROUND_UP(length, 4) << 8);
+	iowrite32(header, n1x_rot_reg(p, N1X_ROT_IN_DATA));
+	for (offset = 0; offset < length; offset += 4) {
+		u8 word[4] = { };
+
+		memcpy(word, message + offset, min_t(size_t, 4, length - offset));
+		iowrite32(get_unaligned_le32(word), n1x_rot_reg(p, N1X_ROT_IN_DATA));
+	}
+	wmb();
+	iowrite32(1, n1x_rot_reg(p, N1X_ROT_IN_CONTROL));
+	ret = n1x_rot_wait(p, N1X_ROT_SAFETY_STATUS, deadline);
+	if (ret)
+		goto poison;
+	/* Safety FIFO echoes the bitwise complement of the exact header and
+	 * every padded payload word. Never bypass a mismatch or retry a command
+	 * whose execution state is unknown.
+	 */
+	value = ioread32(n1x_rot_reg(p, N1X_ROT_SAFETY_DATA));
+	if (~value != header) {
+		ret = -EPROTO;
+		goto poison;
+	}
+	for (offset = 0; offset < length; offset += 4) {
+		u8 word[4] = { };
+
+		memcpy(word, message + offset, min_t(size_t, 4, length - offset));
+		value = ioread32(n1x_rot_reg(p, N1X_ROT_SAFETY_DATA));
+		if (~value != get_unaligned_le32(word)) {
+			ret = -EPROTO;
+			goto poison;
+		}
+	}
+	iowrite32(1, n1x_rot_reg(p, N1X_ROT_SAFETY_ACK));
+	ret = n1x_rot_wait(p, N1X_ROT_OUT_STATUS, deadline);
+	if (ret)
+		goto poison;
+	/* NvMailboxGetResponse at VA 140003bd0 reads one 16-byte FIFO packet. */
+	for (offset = 0; offset < N1X_PFI_RX_PACKET; offset += 4) {
+		value = ioread32(n1x_rot_reg(p, N1X_ROT_OUT_DATA));
+		put_unaligned_le32(value, reply + offset);
+	}
+	iowrite32(1, n1x_rot_reg(p, N1X_ROT_OUT_ACK));
+	return 0;
+poison:
+	p->poisoned = true;
+	return ret;
+}
+
+static int n1x_pfi_write(struct n1x_pluton *p, u8 channel, const u8 *data,
+			 size_t length, unsigned long deadline)
+{
+	u8 packet[8 + N1X_PFI_TX_FRAGMENT], reply[N1X_PFI_RX_PACKET];
+	size_t offset = 0;
+	int ret, size;
+
+	do {
+		size_t count = min_t(size_t, length - offset, N1X_PFI_TX_FRAGMENT);
+
+		size = n1x_pfi_write_packet(packet, channel, data + offset, count,
+					    offset + count < length);
+		if (size < 0)
+			return size;
+		ret = n1x_rot_message(p, packet, size, reply, deadline);
+		if (ret)
+			return ret;
+		ret = n1x_pfi_decode_write(reply, sizeof(reply), &p->last_pfi_status);
+		if (ret) {
+			p->poisoned = true;
+			return ret;
+		}
+		if (p->last_pfi_status) {
+			/* A rejected continuation leaves an incomplete remote message.
+			 * Do not let the next caller append an unrelated request to it.
+			 */
+			if (offset)
+				p->poisoned = true;
+			return -EREMOTEIO;
+		}
+		offset += count;
+	} while (offset < length);
+	return 0;
+}
+
+static int n1x_pfi_read(struct n1x_pluton *p, u8 channel, u8 *data,
+			size_t capacity, u32 *actual, unsigned long deadline)
+{
+	u8 request[8], reply[N1X_PFI_RX_PACKET];
+	size_t total = 0;
+	u16 count;
+	int ret, more;
+
+	*actual = 0;
+	n1x_pfi_read_packet(request, channel);
+	do {
+		ret = n1x_rot_message(p, request, sizeof(request), reply, deadline);
+		if (ret)
+			return ret;
+		ret = n1x_pfi_decode_read(reply, sizeof(reply), &p->last_pfi_status, &count, &more);
+		if (ret || total + count > N1X_PFI_MAX_MESSAGE) {
+			p->poisoned = true;
+			return ret ?: -EMSGSIZE;
+		}
+		if (p->last_pfi_status)
+			return -EREMOTEIO;
+		if (data && total < capacity)
+			memcpy(data + total, reply + 12, min_t(size_t, count, capacity - total));
+		total += count;
+		/* Drain only the response belonging to our serialized request, even
+		 * if the caller supplied too little space. Bound size and wall time.
+		 */
+		if (!count && more) {
+			p->poisoned = true;
+			return -EPROTO;
+		}
+	} while (more);
+	*actual = total;
+	return total > capacity ? -EMSGSIZE : 0;
+}
+
+static int n1x_pfi_channels(struct n1x_pluton *p, struct n1x_pluton_channels *channels,
+			     unsigned long deadline)
+{
+	u8 command[4] = { };
+	u32 actual;
+	int ret;
+
+	memset(channels, 0, sizeof(*channels));
+	ret = n1x_pfi_write(p, 0, command, sizeof(command), deadline);
+	if (ret == -EREMOTEIO && p->last_pfi_status == N1X_PFI_BUSY) {
+		ret = n1x_pfi_read(p, 0, NULL, sizeof(channels->channel), &actual, deadline);
+		if (!ret)
+			ret = n1x_pfi_write(p, 0, command, sizeof(command), deadline);
+	}
+	if (ret)
+		return ret;
+	ret = n1x_pfi_read(p, 0, (u8 *)channels->channel, sizeof(channels->channel), &actual, deadline);
+	if (ret)
+		return ret;
+	if (actual & 1) {
+		p->poisoned = true;
+		return -EPROTO;
+	}
+	channels->count = actual / 2;
+	return 0;
+}
+
+static int n1x_pluton_rpc(struct n1x_pluton *p, struct n1x_pluton_exchange *exchange,
+			  const u8 *tx, u8 *rx, unsigned long deadline)
+{
+	struct n1x_pluton_channels channels;
+	unsigned int i;
+	int ret;
+
+	ret = n1x_pfi_channels(p, &channels, deadline);
+	if (ret)
+		return ret;
+	for (i = 0; i < channels.count; i++)
+		if (channels.channel[i].id == exchange->channel)
+			break;
+	if (i == channels.count || !(channels.channel[i].flags & BIT(0)))
+		return -EBUSY;
+	if (channels.channel[i].flags & BIT(1))
+		return -EBUSY; /* Never discard another client's pending response. */
+	ret = n1x_pfi_write(p, exchange->channel, tx, exchange->tx_size, deadline);
+	if (ret)
+		return ret;
+	for (;;) {
+		if (time_after_eq(jiffies, deadline)) {
+			p->poisoned = true;
+			return -ETIMEDOUT;
+		}
+		ret = n1x_pfi_channels(p, &channels, deadline);
+		if (ret) {
+			/* The RPC was submitted; its completion state is now unknown. */
+			p->poisoned = true;
+			return ret;
+		}
+		for (i = 0; i < channels.count; i++)
+			if (channels.channel[i].id == exchange->channel &&
+			    (channels.channel[i].flags & BIT(1)))
+				return n1x_pfi_read(p, exchange->channel, rx, exchange->rx_size,
+					    &exchange->rx_actual, deadline);
+		usleep_range(1000, 2000);
+	}
+}
+
+static long n1x_pluton_ioctl(struct file *file, unsigned int command, unsigned long arg)
+{
+	struct n1x_pluton *p = file->private_data;
+	void __user *user = (void __user *)arg;
+	struct n1x_pluton_info info = { };
+	struct n1x_pluton_channels channels;
+	struct n1x_pluton_exchange exchange = { };
+	u8 *tx = NULL, *rx = NULL;
+	unsigned long deadline;
+	int ret;
+
+	if (command != N1X_PLUTON_INFO && command != N1X_PLUTON_CHANNELS &&
+	    command != N1X_PLUTON_EXCHANGE)
+		return -ENOTTY;
+	if (command != N1X_PLUTON_INFO && !capable(CAP_SYS_RAWIO))
+		return -EPERM;
+	if (command == N1X_PLUTON_EXCHANGE) {
+		if (copy_from_user(&exchange, user, sizeof(exchange)))
+			return -EFAULT;
+		if (!exchange.channel || exchange.channel > U8_MAX || exchange.reserved ||
+		    exchange.tx_size < 12 || exchange.tx_size > N1X_PFI_MAX_MESSAGE ||
+		    exchange.rx_size < 16 || exchange.rx_size > N1X_PFI_MAX_MESSAGE)
+			return -EINVAL;
+		tx = memdup_user(u64_to_user_ptr(exchange.tx_ptr), exchange.tx_size);
+		if (IS_ERR(tx))
+			return PTR_ERR(tx);
+		if (tx[1] != exchange.channel) {
+			ret = -EINVAL;
+			goto free;
+		}
+		rx = kvzalloc(exchange.rx_size, GFP_KERNEL);
+		if (!rx) {
+			ret = -ENOMEM;
+			goto free;
+		}
+	}
+	ret = mutex_lock_interruptible(&p->lock);
+	if (ret)
+		goto free;
+	if (p->removed || p->suspended) {
+		ret = -ENODEV;
+		goto unlock;
+	}
+	if (command == N1X_PLUTON_INFO) {
+		info.abi_version = 1;
+		info.boot_status = ioread32(n1x_rot_reg(p, N1X_ROT_BOOT_STATUS));
+		info.register_stride = 0x10;
+		info.transport_enabled = enable_transport;
+		info.initialized = p->initialized;
+		info.poisoned = p->poisoned;
+		info.last_pfi_status = p->last_pfi_status;
+		ret = copy_to_user(user, &info, sizeof(info)) ? -EFAULT : 0;
+		goto unlock;
+	}
+	deadline = jiffies + msecs_to_jiffies(10000);
+	ret = n1x_rot_init(p, deadline);
+	if (ret)
+		goto unlock;
+	if (command == N1X_PLUTON_CHANNELS) {
+		ret = n1x_pfi_channels(p, &channels, deadline);
+		if (!ret && copy_to_user(user, &channels, sizeof(channels)))
+			ret = -EFAULT;
+	} else {
+		exchange.rx_actual = 0;
+		ret = n1x_pluton_rpc(p, &exchange, tx, rx, deadline);
+		exchange.remote_status = p->last_pfi_status;
+		if (!ret && copy_to_user(u64_to_user_ptr(exchange.rx_ptr), rx, exchange.rx_actual))
+			ret = -EFAULT;
+		if (copy_to_user(user, &exchange, sizeof(exchange)))
+			ret = -EFAULT;
+	}
+unlock:
+	mutex_unlock(&p->lock);
+free:
+	kfree(tx);
+	kvfree(rx);
+	return ret;
+}
+
+static void n1x_pluton_free(struct kref *reference)
+{
+	kfree(container_of(reference, struct n1x_pluton, reference));
+}
+
+static int n1x_pluton_open(struct inode *inode, struct file *file)
+{
+	struct n1x_pluton *p = container_of(file->private_data, struct n1x_pluton, misc);
+
+	kref_get(&p->reference);
+	file->private_data = p;
+	return nonseekable_open(inode, file);
+}
+
+static int n1x_pluton_release(struct inode *inode, struct file *file)
+{
+	struct n1x_pluton *p = file->private_data;
+
+	kref_put(&p->reference, n1x_pluton_free);
+	return 0;
+}
+
+static const struct file_operations n1x_pluton_fops = {
+	.owner = THIS_MODULE,
+	.open = n1x_pluton_open,
+	.release = n1x_pluton_release,
+	.unlocked_ioctl = n1x_pluton_ioctl,
+	.compat_ioctl = compat_ptr_ioctl,
+};
+
+static int n1x_pluton_probe(struct platform_device *pdev)
+{
+	struct device *dev = &pdev->dev;
+	struct resource *regs, *stride;
+	struct resource window = { .flags = IORESOURCE_MEM };
+	struct n1x_pluton *p;
+	unsigned long long revision;
+	int ret;
+
+	if (!dmi_match(DMI_PRODUCT_NAME, "ProArt P16 H7607BA") ||
+	    !dmi_match(DMI_BIOS_VERSION, "H7607BA.300"))
+		return -ENODEV;
+	if (ACPI_FAILURE(acpi_evaluate_integer(ACPI_HANDLE(dev), "_HRV", NULL, &revision)) ||
+	    revision != 1)
+		return -ENODEV;
+	regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+	stride = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+	if (!regs || !stride || regs->start != 0x18020000 || resource_size(regs) != 0x1000 ||
+	    stride->start != regs->start || resource_size(stride) != 0x10)
+		return dev_err_probe(dev, -ENODEV, "unrecognized ROT1 mailbox resources\n");
+	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	if (!p)
+		return -ENOMEM;
+	kref_init(&p->reference);
+	mutex_init(&p->lock);
+	window.start = regs->start + N1X_ROT_IN_DATA;
+	window.end = regs->start + N1X_ROT_ERROR_CLEAR1 + sizeof(u32) - 1;
+	window.name = dev_name(dev);
+	p->regs = devm_ioremap_resource(dev, &window);
+	if (IS_ERR(p->regs)) {
+		ret = PTR_ERR(p->regs);
+		goto put;
+	}
+	p->misc.minor = MISC_DYNAMIC_MINOR;
+	p->misc.name = "n1x-pluton";
+	p->misc.fops = &n1x_pluton_fops;
+	p->misc.parent = dev;
+	p->misc.mode = 0600;
+	platform_set_drvdata(pdev, p);
+	ret = misc_register(&p->misc);
+	if (ret)
+		goto put;
+	dev_info(dev, "ROT1 diagnostic device registered; PFI transactions %s\n",
+		 enable_transport ? "enabled on request" : "disabled");
+	return 0;
+put:
+	kref_put(&p->reference, n1x_pluton_free);
+	return ret;
+}
+
+static void n1x_pluton_remove(struct platform_device *pdev)
+{
+	struct n1x_pluton *p = platform_get_drvdata(pdev);
+
+	misc_deregister(&p->misc);
+	mutex_lock(&p->lock);
+	p->removed = true;
+	p->regs = NULL;
+	mutex_unlock(&p->lock);
+	kref_put(&p->reference, n1x_pluton_free);
+}
+
+static int n1x_pluton_suspend(struct device *dev)
+{
+	struct n1x_pluton *p = dev_get_drvdata(dev);
+
+	mutex_lock(&p->lock);
+	p->suspended = true;
+	mutex_unlock(&p->lock);
+	return 0;
+}
+
+static int n1x_pluton_resume(struct device *dev)
+{
+	struct n1x_pluton *p = dev_get_drvdata(dev);
+
+	mutex_lock(&p->lock);
+	p->suspended = false;
+	p->initialized = false;
+	mutex_unlock(&p->lock);
+	return 0;
+}
+
+static DEFINE_SIMPLE_DEV_PM_OPS(n1x_pluton_pm, n1x_pluton_suspend, n1x_pluton_resume);
+
+static const struct acpi_device_id n1x_pluton_ids[] = {
+	{ "NVDA8601" },
+	{ }
+};
+MODULE_DEVICE_TABLE(acpi, n1x_pluton_ids);
+
+static struct platform_driver n1x_pluton_driver = {
+	.probe = n1x_pluton_probe,
+	.remove = n1x_pluton_remove,
+	.driver = {
+		.name = "n1x-pluton",
+		.acpi_match_table = n1x_pluton_ids,
+		.pm = pm_sleep_ptr(&n1x_pluton_pm),
+	},
+};
+module_platform_driver(n1x_pluton_driver);
+MODULE_DESCRIPTION("Experimental N1X ROT1 mailbox/PFI transport; hardware validation pending");
+MODULE_LICENSE("GPL");
+MODULE_VERSION("0.1.1");

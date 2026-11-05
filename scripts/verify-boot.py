@@ -7,7 +7,11 @@ import re
 import struct
 import subprocess
 import tempfile
-RELEASE = '7.2.8-23-omarchy-p16-asus'
+QUALIFIED_KERNELS = {
+    '7.2.8-23-omarchy-p16-asus': 'linux-p16-asus-23',
+    '7.2.8-23-omarchy-p16-asus-npu2': 'linux-p16-asus-23-npu2',
+    '7.2.8-23-rtx-spark-npu': 'linux-rtx-spark-npu',
+}
 PINS = {'DSDT.aml': '80e0ad4a051704003d09029cb600a9814e1cd370ce774b9749dc09d2232b5aaf', 'SSDT.aml': '9b28ffc14c19f8b7ea2278de88ff9ec070f5f70401107d81fef067a916aa9695'}
 
 def sections(path):
@@ -33,9 +37,11 @@ def sections(path):
 
 def verify_image(path):
     sec = sections(path)
-    if not sec['.uname'].rstrip(b'\x00\n').decode() == RELEASE:
-        raise ValueError('Falscher Kernelrelease im UKI')
-    modules = Path('/usr/lib/modules') / RELEASE
+    release = sec['.uname'].rstrip(b'\x00\n').decode()
+    package = QUALIFIED_KERNELS.get(release)
+    if package is None:
+        raise ValueError('Nicht qualifizierter Kernelrelease im UKI: ' + release)
+    modules = Path('/usr/lib/modules') / release
     symbols = (modules / 'build/System.map').read_text()
     if not re.search(' T arch_alloc_acpi_tables$', symbols, re.M):
         raise ValueError('ARM64-ACPI-Allocator fehlt')
@@ -79,15 +85,17 @@ def verify_image(path):
         if not '/' + module in listing:
             raise ValueError('Modul fehlt: ' + module)
     for name in ['vfat', 'autofs4', 'zram', 'nvidia', 'nvidia_drm', 'spi_hid_acpi', 'hid_asus', 'wmi', 'asus_wmi', 'asus_nb_wmi']:
-        deps = subprocess.check_output(['modprobe', '-S', RELEASE, '--show-depends', name], text=True)
+        deps = subprocess.check_output(['modprobe', '-S', release, '--show-depends', name], text=True)
         for line in deps.splitlines():
             if line.startswith('insmod '):
                 if not Path(line.split()[1]).is_file():
                     raise ValueError(line)
-        if not subprocess.check_output(['modinfo', '-k', RELEASE, '-F', 'vermagic', name], text=True).split()[0] == RELEASE:
+        if not subprocess.check_output(['modinfo', '-k', release, '-F', 'vermagic', name], text=True).split()[0] == release:
             raise ValueError('Falsche Modulversion: ' + name)
-    if not subprocess.check_output(['pacman', '-Qoq', '/usr/lib/modules/' + RELEASE + '/vmlinuz'], text=True).strip() == 'linux-p16-asus-23':
-        raise ValueError('Kernelimage gehört nicht zum P16-Paket')
+    owner = subprocess.check_output(
+        ['pacman', '-Qoq', '/usr/lib/modules/' + release + '/vmlinuz'], text=True).strip()
+    if owner != package:
+        raise ValueError(f'Kernelimage gehört {owner}, erwartet wurde {package}')
     print('UKI, ACPI-Overrides und Modulabhängigkeiten gültig:', path)
 
 def verify_menu(config_path=Path('/boot/limine.conf'), boot_root=Path('/boot')):

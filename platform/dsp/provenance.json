@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "target": {"product": "ProArt P16 H7607BA", "bios": "H7607BA.300"},
+  "oem": {
+    "driver": "nvadsp.sys", "version": "2.13.0.1",
+    "sha256": "8b21e4652bb0ac178a2c470c8d6f982155e715c46112ac3b93de3ebfe00b13d6",
+    "sroot_driver": "nvsrootmbx.sys",
+    "sroot_sha256": "f814e861b5e076aa4e00619a8a588df3c4ae9ec2b5026c30748ba493ce0e6d8a",
+    "input_manifest": "../../config/platform-oem.json",
+    "analysis": "Static analysis only; Windows binaries never executed",
+    "functions": {
+      "core_and_image_id": "FUN_140030100; literals 0x140030268..0x140030270",
+      "shared_sram_tail": "FUN_140030000",
+      "shared_dram_allocation": "FUN_140002618",
+      "signed_image_selection": "FUN_140008c38",
+      "dram_publication_and_boot": "FUN_14004e000",
+      "receive_isr": "FUN_1400051f0",
+      "receive_copy_and_release": "FUN_140005400",
+      "notification_class": "FUN_140005980; byte 19 high nibble 2",
+      "ready_notification": "FUN_140006220; u16 offset 22 == 0xf002",
+      "sroot_image_upload": "nvsrootmbx FUN_140031c98; command 0x18"
+    }
+  },
+  "linux_power_reference": {
+    "url": "https://github.com/NVIDIA/NV-Kernels/commit/adfdf495ec524abc32a01cc4a445395b973c597d",
+    "path": "sound/soc/sof/mediatek/mt8901/mt8901.c",
+    "git_blob": "b574bedfa16c9cbd58da049b5aa92d8f4db79842",
+    "sha256": "70229ef4f20eeeb4b3507e4d28bf9d0f2e73be6490843e8bd6f39c099bea7084"
+  },
+  "shared_loader": {
+    "owner": "n1x_npu_bootstrap / NVDA8600",
+    "kernel_api": "n1x_sroot_upload_dsp_v1",
+    "header": "n1x_sroot_client.h",
+    "implementation": "../../../n1x-lab/npu/driver/n1x_npu_boot_linux.c",
+    "serialized_with_npu_boot": true,
+    "pinned_images_only": true,
+    "uncertain_completion_policy": "poison shared loader and retain DMA/PM/module references until reboot"
+  },
+  "scope": {
+    "auto_boot": false,
+    "audio_services": false,
+    "compute_services": false,
+    "firmware_authentication_on_hardware": "2026-11-05: all three pinned signed images accepted by SROOT; reply header 0x18/status zero",
+    "ready_notification_on_hardware": "2026-11-05: both HiFi5 cores and HiFi1 sent notification-class command 0xf002; error zero",
+    "npu_coexistence": "eight independently verified numerical inference outputs with all three DSPs running",
+    "boot_evidence": "n1x-lab/results/platform-enablement-20261105/dsp-boot-trial-2.json",
+    "sram_preflight": "two read-only power-cycle observations showed changing, nonzero config words outside the valid DMA-window ABI; preserve pending notifications and valid existing DMA descriptors",
+    "reboot_verified": false
+  }
+}

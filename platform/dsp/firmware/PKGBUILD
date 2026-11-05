@@ -1,0 +1,17 @@
+pkgname=n1x-adsp-firmware-local
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Locally extracted original signed MT8901 DSP firmware for the P16'
+arch=('any')
+license=('custom')
+source=('hifi5-0-mt8901-signed.bin' 'hifi5-1-mt8901-signed.bin' 'hifi1-0-mt8901-signed.bin')
+sha256sums=('350e0d40b2f8a6dfb486d8dfd3362fb5b02ceb90da372176b008498adbca8cc4'
+            '517ef0d447ca80b7cb88ec0589cda816d9b20c844800ca95ccf7cbe96fc7d40e'
+            '434660b36f4e21cb794bc50e10a47b91882710cbe90cb60620111a2a753c5b94')
+
+package() {
+  local file
+  for file in "${source[@]}"; do
+    install -Dm644 "$srcdir/$file" "$pkgdir/usr/lib/firmware/nvidia/n1x/$file"
+  done
+}

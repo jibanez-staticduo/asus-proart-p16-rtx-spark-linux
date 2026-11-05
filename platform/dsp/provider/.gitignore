@@ -1,0 +1,7 @@
+PKGBUILD
+npu-source.tar.gz
+src/
+pkg/
+*.pkg.tar.*
+.SRCINFO
+receipt.json

@@ -1,0 +1,90 @@
+#!/usr/bin/python
+"""Gate the current NPU provider on the validated P16 firmware and DMA layout."""
+import argparse
+import hashlib
+from pathlib import Path
+import platform
+import re
+
+KERNELS = {"7.2.8-23-omarchy-p16-asus-npu2", "7.2.8-23-rtx-spark-npu"}
+SYS = Path("/sys")
+EXPECTED_IOMMU = {"NVDA200A:00": "smmu3.0x0000000035000000",
+                  "NVDA8600:00": "smmu3.0x0000000014900000"}
+
+
+def fields(text):
+    return dict(item.split("=", 1) for item in text.split() if "=" in item)
+
+
+def check_host(sysroot=SYS, release=None, firmware=Path("/usr/lib/firmware/nvidia/n1x/sroot-v0.bin")):
+    if (release or platform.release()) not in KERNELS:
+        raise RuntimeError("Unqualified NPU kernel; startup skipped")
+    for name, value in (("sys_vendor", "ASUS"), ("product_name", "ProArt P16 H7607BA"),
+                        ("bios_version", "H7607BA.300")):
+        if (sysroot / "class/dmi/id" / name).read_text().strip() != value:
+            raise RuntimeError("Unqualified host/BIOS; startup skipped")
+    data = firmware.read_bytes()
+    if len(data) != 67508 or hashlib.sha256(data).hexdigest() != \
+            "0f16911cced7bb95773da5aff9d9a44dfd1b1a11f3c560ee698a5c99310ff2c4":
+        raise RuntimeError("Unqualified NPU secure-loader image")
+
+
+def prepare(sysroot=SYS):
+    devices = sysroot / "bus/platform/devices"
+    bound = [(devices / name / "driver").exists() for name in EXPECTED_IOMMU]
+    if all(bound):
+        verify(sysroot)
+        return
+    if any(bound):
+        raise RuntimeError("Partially bound NPU; no mode change or retry")
+    controls = []
+    for name, supplier in EXPECTED_IOMMU.items():
+        device = devices / name
+        if (device / "iommu").resolve(strict=True).name != supplier:
+            raise RuntimeError("Unexpected NPU SMMU supplier")
+        group = (device / "iommu_group").resolve(strict=True)
+        if group.parent != (sysroot / "kernel/iommu_groups").resolve(strict=True) or \
+                {path.name for path in (group / "devices").iterdir()} != {name}:
+            raise RuntimeError("Unexpected shared NPU IOMMU group")
+        control = group / "type"
+        mode = control.read_text().strip()
+        if mode not in ("identity", "DMA", "DMA-FQ"):
+            raise RuntimeError("Unsupported NPU IOMMU domain type")
+        controls.append((control, mode))
+    for control, mode in controls:
+        if mode == "identity":
+            control.write_text("DMA\n")
+        if control.read_text().strip() not in ("DMA", "DMA-FQ"):
+            raise RuntimeError("NPU DMA-domain selection failed")
+
+
+def verify(sysroot=SYS, symbols=Path("/proc/kallsyms")):
+    device = sysroot / "bus/platform/devices/NVDA200A:00"
+    if (device / "driver").resolve(strict=True).name != "n1x-npu-bootstrap":
+        raise RuntimeError("Wrong NPU driver")
+    debug = sysroot / "kernel/debug/n1x-npu-bootstrap"
+    state, hfrp = fields((debug / "status").read_text()), fields((debug / "hfrp_status").read_text())
+    if any(state.get(key) != "1" for key in ("dla_bound", "sroot_bound", "idle_observed", "ping_verified",
+            "region5_registered", "config_valid", "config_apply_accepted", "lpwr_accepted", "task_verified")) or \
+            state.get("error") != "0" or state.get("queue_poisoned") != "0" or \
+            hfrp.get("power_accepted") != "1" or hfrp.get("error") != "0":
+        raise RuntimeError("NPU startup failed; no retry or forced unload")
+    if not re.search(r"\bn1x_sroot_upload_dsp_v1\s+\[n1x_npu_bootstrap\]", symbols.read_text()):
+        raise RuntimeError("Shared SROOT provider is absent")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    choice = parser.add_mutually_exclusive_group(required=True)
+    for name in ("check-host", "prepare", "verify"):
+        choice.add_argument("--" + name, action="store_true")
+    args = parser.parse_args()
+    check_host()
+    if args.prepare:
+        prepare()
+    if args.verify:
+        verify()
+
+
+if __name__ == "__main__":
+    main()
