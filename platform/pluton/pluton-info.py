@@ -1,10 +1,119 @@
 #!/usr/bin/env python3
-"""Read ROT1 status, or explicitly query PFI channel availability."""
+"""Read ROT1 status and explicitly query PFI or PCBI capabilities."""
 import argparse
+import ctypes
+import errno
 import fcntl
 import json
 import os
 import struct
+
+PCBI_SUCCESS = 0x7986ACBD
+PCBI_SERVICE_QUERY = 1
+PCBI_ENUMERATE_SERVICES = 5
+PCBI_ENUMERATE_VERSIONS = 7
+PCBI_DEVICE_INFO = 4
+PCBI_REPLY_CAPACITY = 1024
+PCBI_DEVICE_INFO_CAPACITY = 4096
+
+
+def query_request(command):
+    if command not in (PCBI_DEVICE_INFO, PCBI_ENUMERATE_SERVICES, PCBI_ENUMERATE_VERSIONS):
+        raise ValueError('unsupported PCBI query')
+    return struct.pack('<BBHBBHI', 1, PCBI_SERVICE_QUERY, 0, 1, 1, 0, command)
+
+
+def query_capacity(command):
+    query_request(command)
+    return PCBI_DEVICE_INFO_CAPACITY if command == PCBI_DEVICE_INFO else PCBI_REPLY_CAPACITY
+
+
+def decode_device_info(body):
+    if len(body) < 8 or not body[0]:
+        raise ValueError('invalid PCBI device-info header')
+    packages, offset = [], 8
+    for _ in range(body[1]):
+        if len(body) - offset < 36:
+            raise ValueError('truncated PCBI package record')
+        record = body[offset:offset + 36]
+        custom_size = struct.unpack_from('<H', record, 34)[0]
+        if (not any(record[:8]) or not record[32] or record[33] & 0xf0 or
+                custom_size > 64 or custom_size > len(body) - offset - 36):
+            raise ValueError('invalid PCBI package record')
+        packages.append({'name_hex': record[:8].hex(),
+                         'metadata_hex': record[8:32].hex(),
+                         'type': record[32], 'flags': record[33],
+                         'custom_data_hex': body[offset + 36:offset + 36 + custom_size].hex()})
+        offset += 36 + custom_size
+    if offset != len(body):
+        raise ValueError('invalid PCBI package count or trailing data')
+    return {'platform_id': body[0], 'header_data_hex': body[2:8].hex(),
+            'packages': packages}
+
+
+def decode_query(reply, command):
+    if len(reply) < 16 or len(reply) > query_capacity(command):
+        raise ValueError('invalid PCBI reply size')
+    version, service, length, service_version, kind, reserved, echoed, result = \
+        struct.unpack_from('<BBHBBHII', reply)
+    if (version, service, service_version, kind, echoed) != (1, 1, 1, 2, command):
+        raise ValueError('PCBI reply does not match the query')
+    if length != len(reply) - 16:
+        raise ValueError('invalid PCBI body length')
+    if result != PCBI_SUCCESS:
+        if length or len(reply) != 16:
+            raise ValueError('invalid PCBI error reply')
+        raise ValueError(f'PCBI query failed: {result:#010x}')
+    if command == PCBI_DEVICE_INFO:
+        return decode_device_info(reply[16:])
+    if command == PCBI_ENUMERATE_VERSIONS:
+        if length < 1 or reply[16] != length - 1:
+            raise ValueError('invalid PCBI version count')
+        return list(reply[17:])
+    if length < 4:
+        raise ValueError('missing PCBI service count')
+    count = struct.unpack_from('<I', reply, 16)[0]
+    if count * 2 + 4 != length:
+        raise ValueError('invalid PCBI service count')
+    return [{'id': reply[20 + 2 * index], 'version': reply[21 + 2 * index]}
+            for index in range(count)]
+
+
+def legacy_query_ioctl(fd, command):
+    request = query_request(command)
+    capacity = query_capacity(command)
+    tx = ctypes.create_string_buffer(request, len(request))
+    rx = ctypes.create_string_buffer(capacity)
+    exchange = bytearray(struct.pack('<4I2Q2I', PCBI_SERVICE_QUERY, len(request),
+                                    capacity, 0, ctypes.addressof(tx),
+                                    ctypes.addressof(rx), 0, 0))
+    fcntl.ioctl(fd, (3 << 30) | (len(exchange) << 16) | (ord('P') << 8) | 2,
+                exchange, True)
+    channel, tx_size, rx_size, actual, tx_ptr, rx_ptr, status, reserved = \
+        struct.unpack('<4I2Q2I', exchange)
+    if status or reserved or actual > capacity:
+        raise ValueError('invalid PFI exchange result')
+    return decode_query(rx.raw[:actual], command)
+
+
+def query_ioctl(fd, command):
+    capacity = query_capacity(command)
+    rx = ctypes.create_string_buffer(capacity)
+    pointer = ctypes.addressof(rx)
+    query = bytearray(struct.pack('<4IQ2I', command, capacity, 0, 0, pointer, 0, 0))
+    try:
+        fcntl.ioctl(fd, (3 << 30) | (len(query) << 16) | (ord('P') << 8) | 3,
+                    query, True)
+    except OSError as error:
+        if error.errno != errno.ENOTTY:
+            raise
+        return legacy_query_ioctl(fd, command)
+    echoed, rx_size, actual, result, rx_ptr, reserved1, reserved2 = \
+        struct.unpack('<4IQ2I', query)
+    if (echoed != command or rx_size != capacity or rx_ptr != pointer or
+            reserved1 or reserved2 or actual > capacity or result != PCBI_SUCCESS):
+        raise ValueError('invalid kernel PCBI query result')
+    return decode_query(rx.raw[:actual], command)
 
 
 def read_ioctl(fd, number, size):
@@ -18,6 +127,12 @@ def main():
     parser.add_argument("--device", default="/dev/n1x-pluton")
     parser.add_argument("--discover", action="store_true",
                         help="perform PFI control-channel transactions; requires enable_transport=1")
+    parser.add_argument('--services', action='store_true',
+                        help='execute PCBI query-service command 5 to list service IDs and versions')
+    parser.add_argument('--versions', action='store_true',
+                        help='execute PCBI query-service command 7 to list protocol versions')
+    parser.add_argument('--device-info', action='store_true',
+                        help='query running firmware platform/package metadata with PCBI command 4')
     args = parser.parse_args()
     result = {"device": args.device}
     try:
@@ -29,6 +144,9 @@ def main():
             result.update(zip(keys, values))
             if result["abi_version"] != 1:
                 raise ValueError("unsupported driver ABI")
+            if args.discover or args.services or args.versions or args.device_info:
+                if not result['transport_enabled'] or result['poisoned']:
+                    raise ValueError('PFI transport is disabled or in an uncertain state')
             if args.discover:
                 buf = read_ioctl(fd, 1, 40)
                 count, reserved = struct.unpack_from("<II", buf)
@@ -38,6 +156,12 @@ def main():
                                        "write_ready": bool(buf[9 + i * 2] & 1),
                                        "read_ready": bool(buf[9 + i * 2] & 2)}
                                       for i in range(count)]
+            if args.versions:
+                result['pcbi_versions'] = query_ioctl(fd, PCBI_ENUMERATE_VERSIONS)
+            if args.services:
+                result['pcbi_services'] = query_ioctl(fd, PCBI_ENUMERATE_SERVICES)
+            if args.device_info:
+                result['pcbi_device_info'] = query_ioctl(fd, PCBI_DEVICE_INFO)
         finally:
             os.close(fd)
     except (OSError, ValueError) as error:

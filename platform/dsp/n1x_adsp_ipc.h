@@ -53,8 +53,7 @@ static inline void n1x_adsp_ipc_put32(__u8 *p, __u32 value)
 	p[3] = value >> 24;
 }
 
-/* nvasd's constructor supports scalar parameters and an inline data payload.
- * Build privately so rejected inputs cannot partly alter a published packet.
+/* Build privately so rejected inputs cannot partly alter a published packet.
  * The transport owns token allocation and must serialize publication.
  */
 static inline int n1x_adsp_ipc_encode(__u8 *packet, size_t capacity,
@@ -88,8 +87,8 @@ static inline int n1x_adsp_ipc_encode(__u8 *packet, size_t capacity,
 	return 0;
 }
 
-/* Decode only observed fields. Receive packets are not required to have the
- * transmit constructor's word0 or length values without firmware evidence.
+/* Receive classification uses the inner header. The outer word0 and length
+ * fields are returned verbatim; callers must not use them as payload bounds.
  */
 static inline int n1x_adsp_ipc_decode(struct n1x_adsp_ipc_header *header,
 				    const __u8 *packet, size_t bytes)

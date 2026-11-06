@@ -12,9 +12,8 @@
 #include <string.h>
 #endif
 
-/* Observed in Microsoft's PlutonNv 10.0.28000.3365: PFI v0 uses command
- * 0x3f, a maximum 44-byte write fragment, and 12-byte read-response headers.
- * This is a wire-format description, not a declaration of PCBI service IDs.
+/* PFI v0 uses command 0x3f, at most 44 bytes per write fragment, and
+ * 12-byte read-response headers. PCBI service framing is a separate layer.
  */
 #define N1X_PFI_TX_FRAGMENT 44
 #define N1X_PFI_RX_PACKET 16

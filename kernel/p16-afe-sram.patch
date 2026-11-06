@@ -1,0 +1,1942 @@
+Subject: [PATCH] ASoC: mediatek: mt8901: add DSP playback and SRAM ownership
+
+Provide exclusive, aligned SRAM leases through the AFE owner on the
+validated P16 firmware layout. Each lease retains device, module and
+runtime-PM references. Refuse forced suspend while leases exist and
+disable manual driver detachment. Published buffers remain retained
+until reboot; whole-core quiesce and release are separate work.
+
+Add an optional DL0 DSP client to the existing AFE/SoundWire route.
+Copy committed application frames into the owned DSP host ring and
+defer complete-period notifications to workqueue context. Synchronize
+listeners and drain work before retiring borrowed ALSA pointers.
+The experimental path is disabled by default and lacks hardware
+streaming qualification.
+
+---
+--- /dev/null
++++ b/include/sound/mt8901-afe-sram.h
+@@ -0,0 +1,117 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef MT8901_AFE_SRAM_H
++#define MT8901_AFE_SRAM_H
++
++#include <linux/compiler_types.h>
++#include <linux/types.h>
++
++struct device;
++struct snd_pcm_substream;
++struct mt8901_afe_sram_buffer;
++
++struct mt8901_afe_sram_view {
++	void __iomem *area;
++	u64 cpu_address;
++	u64 afe_address;
++	u64 dsp_address;
++	size_t bytes;
++};
++
++struct mt8901_afe_sram_endpoint {
++	u32 abi_version;
++	struct mt8901_afe_sram_view memory;
++	u32 rate, channels, sample_bits, period_frames, periods;
++	u8 memif, irq;
++	bool published, irq_prepared;
++};
++
++/* Reserve and zero a multiple of 16 bytes from the AFE-owned SRAM pool.
++ * Holds a device, module and runtime-PM reference until an unpublished lease
++ * is released. Returns an exclusive handle or ERR_PTR(); sleeps.
++ */
++struct mt8901_afe_sram_buffer *mt8901_afe_sram_reserve(struct device *dev, size_t bytes);
++
++/* Reserve 1..4 KiB of IPC SRAM from a bound PCM lease's owner, in 1 KiB
++ * multiples. The caller serializes the peer's lifetime. The new lease has
++ * independent references and cannot bind a PCM substream. This call sleeps.
++ */
++struct mt8901_afe_sram_buffer *
++mt8901_afe_sram_reserve_ipc(struct mt8901_afe_sram_buffer *peer, size_t bytes);
++
++/* Mark an IPC lease published before registering its address with firmware.
++ * Published IPC leases retain the same suspend/unload guards as PCM leases.
++ * They cannot be released until a verified DSP quiesce contract is added.
++ */
++int mt8901_afe_sram_publish_ipc(struct mt8901_afe_sram_buffer *buffer);
++
++/* Read the three address views for this allocation. The client selects the
++ * view required by its service protocol; these are not interchangeable DMA
++ * addresses. This copies metadata only and leaves the output unchanged on error.
++ */
++int mt8901_afe_sram_view(struct mt8901_afe_sram_buffer *buffer,
++			struct mt8901_afe_sram_view *view);
++
++/* Bind an unpublished lease during non-running playback stream setup, after
++ * the AFE DAI's hw_params. Derives memif, IRQ and format from that substream;
++ * its complete ring must match the reservation. A bound memif cannot start
++ * another substream until the lease is released. The caller serializes ALSA
++ * setup/teardown around this call. It does not program or start the memif.
++ */
++int mt8901_afe_sram_bind(struct mt8901_afe_sram_buffer *buffer,
++			struct snd_pcm_substream *substream);
++
++/* Return a bound endpoint only while its original AFE substream still owns
++ * the memif and its format is unchanged. bytes must equal sizeof(*endpoint).
++ * The output is unchanged on error. This call sleeps.
++ */
++int mt8901_afe_sram_endpoint(struct mt8901_afe_sram_buffer *buffer,
++			    struct mt8901_afe_sram_endpoint *endpoint, size_t bytes);
++
++/* Program the published lease's memif address, checking each write.
++ * Requires non-running, unchanged ALSA setup, serialized by the caller.
++ * Repeated success performs no writes.
++ * A programming failure is terminal: partial register writes can have exposed
++ * the address, so the lease and its references remain retained. Does not
++ * enable the memif or its IRQ. This call sleeps.
++ */
++int mt8901_afe_sram_prepare(struct mt8901_afe_sram_buffer *buffer);
++
++/* After firmware PREPARE, program the disabled IRQ's counter, rate and active
++ * AFE clock domain. Requires successful address preparation and unchanged,
++ * non-running ALSA setup. Repeated success writes nothing. A write failure
++ * is terminal and retains the lease. Sets endpoint ABI 2's irq_prepared flag
++ * only after complete success. Does not enable or route the IRQ; sleeps.
++ */
++int mt8901_afe_sram_prepare_irq(struct mt8901_afe_sram_buffer *buffer);
++
++/* After acknowledged task STOPs, disable/clear this lease's IRQ and remove
++ * its MCU and HiFi1 target bits. core must be native enum 3 (HiFi1). Allows
++ * the still-running ALSA STOP callback, but requires unchanged ownership and
++ * format. Repeated success writes nothing; failed I/O is terminal. Does not
++ * disable a memif or prove whole-core quiescence; no published memory may be
++ * released. The caller serializes handle lifetime. This call sleeps.
++ */
++int mt8901_afe_sram_stop_irq(struct mt8901_afe_sram_buffer *buffer, unsigned int core);
++
++/* Forget a published lease's ALSA substream before that substream is freed.
++ * Caller first stops or abandons its task and synchronizes its callbacks.
++ * Retains the allocation, memif reservation and power/module references.
++ * Future endpoint/prepare operations fail. No MMIO or DMA release; sleeps.
++ */
++void mt8901_afe_sram_retire(struct mt8901_afe_sram_buffer *buffer);
++
++/* Call after binding and before publishing a buffer address to firmware or
++ * hardware. A published lease cannot be released by the current API and blocks
++ * AFE suspend until reboot.
++ * Service acknowledgements do not establish whole-core DMA quiescence.
++ */
++int mt8901_afe_sram_publish(struct mt8901_afe_sram_buffer *buffer);
++
++/* Release an unpublished lease. EBUSY leaves a published handle and all its
++ * resources intact. Otherwise consumes the handle; a negative runtime-PM
++ * result reports a suspend failure after the lease itself has been released.
++ * The caller serializes operations on each handle. This call sleeps.
++ */
++int mt8901_afe_sram_release(struct mt8901_afe_sram_buffer *buffer);
++
++#endif
+--- /dev/null
++++ b/include/sound/n1x_adsp_client.h
+@@ -0,0 +1,160 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef N1X_ADSP_CLIENT_H
++#define N1X_ADSP_CLIENT_H
++
++#include "n1x_adsp_ipc.h"
++#include "n1x_adsp_pcm.h"
++
++struct device;
++struct n1x_adsp_primary;
++struct mt8901_afe_sram_buffer;
++
++#define N1X_ADSP_PRIMARY_ABI 1U
++
++/* Query the typed playback client contract before opening a task. No firmware
++ * access. ABI 1 includes end-boundary positions and close-time AFE retirement.
++ */
++__u32 n1x_adsp_primary_abi(void);
++
++struct n1x_adsp_primary_pcm_params {
++	__u32 rate, channels, sample_bits, period_frames, periods;
++};
++
++struct n1x_adsp_primary_pcm_view {
++	void *area;
++	size_t bytes;
++};
++
++struct n1x_adsp_ipc_reply {
++	__u8 packet[N1X_ADSP_IPC_BYTES];
++};
++
++/* Kernel service clients supply token=0 and ack_mode=1. The transport assigns
++ * the token and serializes each request through its matching acknowledgment.
++ * A successful exchange does not establish service success or DMA quiescence.
++ * The client validates the service reply and retains any published buffers
++ * until that service's release contract is satisfied. Errors are not retryable.
++ * The reply is unchanged on error. This call sleeps and requires process context.
++ * Tasks 7 and 16 must use the dedicated playback lifecycle API below.
++ */
++int n1x_adsp_transfer(struct device *dev,
++		      const struct n1x_adsp_ipc_request *request,
++		      struct n1x_adsp_ipc_reply *reply);
++
++/* Register the primary playback task's four message buffers on the core
++ * selected by the speaker/headphone firmware properties (P16 route 2, HiFi1).
++ * Route 3 selects a different native task graph and is not implemented here.
++ * Registered buffers
++ * remain owned by the DSP boot allocation; this call does not open a stream.
++ * Repeated calls after success reuse the registration. A failed sequence
++ * cannot be replayed or release its buffers. This call sleeps.
++ */
++int n1x_adsp_prepare_primary(struct device *dev);
++
++/* Open the primary task exclusively after registering its message buffers.
++ * Returns an owned handle or ERR_PTR(). No PCM configuration or START is sent.
++ * A failed firmware request prevents reopening until device reinitialization.
++ * A previous PCM configuration prevents reopening until device reinitialization.
++ * This call sleeps and requires process context.
++ */
++struct n1x_adsp_primary *n1x_adsp_primary_open(struct device *dev);
++
++/* Register and open processing task 16 with AFE-owned SRAM message memory,
++ * then configure the task-7 host ring, task-16 AFE ring and bridge with
++ * commands 4, 0x201 and 4. Sends no PREPARE or START. The AFE must remain in
++ * non-running stream setup, serialized by the caller. Host and AFE formats
++ * must match; period sizes/counts may differ. Missing AFE support is rejected
++ * before any firmware request. A firmware-stage failure is terminal.
++ *
++ * On publication, ownership of *sram transfers to the DSP boot state and
++ * *sram becomes NULL, including if the following request fails. Otherwise
++ * the caller still owns its lease. Published memory remains retained until
++ * verified whole-core shutdown, which is not implemented yet. A failure before
++ * PCM publication can still retain published IPC SRAM. This call sleeps.
++ */
++int n1x_adsp_primary_configure(struct n1x_adsp_primary *primary,
++			       const struct n1x_adsp_primary_pcm_params *params,
++			       struct mt8901_afe_sram_buffer **sram);
++
++/* Prepare task 16 with commands 0x203 (hardware) and 3 (bridge), then task 7
++ * with commands 0x203 and 3 (both host). Revalidates the published AFE endpoint
++ * during non-running ALSA setup;
++ * the caller serializes setup/teardown. Repeated success sends no further IPC.
++ * A firmware-stage failure is terminal and retains both rings. This does not
++ * enable the AFE memif, start a stream or release DMA. Before DSP PREPARE,
++ * the AFE owner programs its memif address with checked writes.
++ * After all four acknowledgements, the owner prepares the disabled IRQ's
++ * period counter, rate and active clock domain. Requires AFE endpoint ABI 2.
++ * A programming failure is terminal. This call sleeps.
++ */
++int n1x_adsp_primary_prepare_pcm(struct n1x_adsp_primary *primary);
++
++/* Return the configured coherent host-ring view to its owning kernel client.
++ * Valid only for this handle's lifetime. No userspace mapping is provided.
++ * The output is unchanged on error. This call sleeps.
++ */
++int n1x_adsp_primary_pcm_view(struct n1x_adsp_primary *primary,
++			      struct n1x_adsp_primary_pcm_view *view);
++
++/* Publish a prepared host ring's write cursor after filling samples through
++ * pcm_view. The caller owns availability and serializes sample writes/handle
++ * lifetime. byte_offset is frame-aligned and may equal the ring size.
++ * Orders completed sample writes before the registered descriptor, preserving
++ * the last validated read address and advancing the write-generation counter.
++ * Sends no mailbox command. A late power error can follow publication; that
++ * error is terminal and the client must not retry or release published memory.
++ * Requires process context. This call sleeps.
++ */
++int n1x_adsp_primary_commit(struct n1x_adsp_primary *primary, __u32 byte_offset);
++
++/* Start the prepared route-2 task-16/task-7 chain in normal playback mode 0.
++ * Requires published samples and AFE endpoint ABI 2 IRQ readiness. The Linux
++ * audio client owns its DAPM/codec routing; this call does not program a gain
++ * or channel merge or enable a CPU memif. Repeated success sends no IPC.
++ * Firmware-stage failures are terminal and may leave hardware active.
++ * Sleeps; the caller serializes sample, stream and handle lifetime.
++ */
++int n1x_adsp_primary_start(struct n1x_adsp_primary *primary);
++
++/* STOP task 7 then task 16, then disable/clear the owned HiFi1 IRQ. Successful
++ * repetition sends no IPC or register writes. Synchronizes and detaches the
++ * period listener; the client must drain its own queued work before freeing
++ * listener data. Does not release memory or prove core quiescence. Restart
++ * after this STOP requires reinitialization and is not implemented yet.
++ * A failed request is terminal. Requires process context; sleeps.
++ */
++int n1x_adsp_primary_stop(struct n1x_adsp_primary *primary);
++
++/* Register one consumed-data listener, or pass NULL to detach it. The listener runs
++ * in IRQ context and must not sleep or call sleeping DSP APIs. Its position
++ * snapshot is valid only during the call. A negative error reports a rejected
++ * notification; no buffer address from that packet is used.
++ * One message does not necessarily correspond to one ALSA period.
++ * Detach and close wait for in-flight IRQ callbacks before returning, so the
++ * caller may then free listener data. Do not hold a lock needed by the listener.
++ * Drain work queued by the listener separately before freeing its data.
++ * Requires process context and serialized handle lifetime. This call sleeps.
++ */
++int n1x_adsp_primary_set_period(struct n1x_adsp_primary *primary,
++			       void (*period)(void *data,
++					      const struct n1x_adsp_pcm_position *position,
++					      int error), void *data);
++
++/* Copy the latest consumed position after prepare. Before the first notification,
++ * valid is false and the offset is zero. Returns a cached notification/transport error
++ * without changing the output. May be called from IRQ context while the caller
++ * retains the handle; this does not acknowledge or publish any firmware data.
++ */
++int n1x_adsp_primary_position(struct n1x_adsp_primary *primary,
++			     struct n1x_adsp_pcm_position *position);
++
++/* Stop a started stream, then send primary HWFREE/CLOSE and, if opened,
++ * processing HWFREE/AFE-HWFREE/CLOSE, stopping at the first error.
++ * Consumes the handle on
++ * every result; the caller must not use it again. Published DMA remains owned
++ * by the DSP driver. Failure leaves the task unavailable for another open.
++ * This call sleeps and requires process context.
++ */
++int n1x_adsp_primary_close(struct n1x_adsp_primary *primary);
++
++#endif
+--- /dev/null
++++ b/include/sound/n1x_adsp_ipc.h
+@@ -0,0 +1,123 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef N1X_ADSP_IPC_H
++#define N1X_ADSP_IPC_H
++
++#include <linux/errno.h>
++#include <linux/types.h>
++#ifdef __KERNEL__
++#include <linux/string.h>
++#else
++#include <stdbool.h>
++#include <stddef.h>
++#include <string.h>
++#endif
++
++#define N1X_ADSP_IPC_BYTES 288U
++#define N1X_ADSP_IPC_PAYLOAD_BYTES 256U
++
++/* Internal packet representation; this is not a userspace ABI. */
++struct n1x_adsp_ipc_request {
++	__u32 parameter1, parameter2;
++	__u16 token, command;
++	__u8 channel, data_mode, ack_mode;
++	const __u8 *payload;
++};
++
++struct n1x_adsp_ipc_header {
++	__u32 word0, length, parameter1, parameter2;
++	__u16 token, command;
++	__u8 channel, message_class, flags, data_mode, ack_mode;
++};
++
++static inline __u16 n1x_adsp_ipc_get16(const __u8 *p)
++{
++	return (__u16)p[0] | (__u16)p[1] << 8;
++}
++
++static inline __u32 n1x_adsp_ipc_get32(const __u8 *p)
++{
++	return (__u32)p[0] | (__u32)p[1] << 8 | (__u32)p[2] << 16 | (__u32)p[3] << 24;
++}
++
++static inline void n1x_adsp_ipc_put16(__u8 *p, __u16 value)
++{
++	p[0] = value;
++	p[1] = value >> 8;
++}
++
++static inline void n1x_adsp_ipc_put32(__u8 *p, __u32 value)
++{
++	p[0] = value;
++	p[1] = value >> 8;
++	p[2] = value >> 16;
++	p[3] = value >> 24;
++}
++
++/* Build privately so rejected inputs cannot partly alter a published packet.
++ * The transport owns token allocation and must serialize publication.
++ */
++static inline int n1x_adsp_ipc_encode(__u8 *packet, size_t capacity,
++				    const struct n1x_adsp_ipc_request *request)
++{
++	__u8 prepared[N1X_ADSP_IPC_BYTES] = {};
++
++	if (!packet || !request)
++		return -EINVAL;
++	if (capacity < sizeof(prepared))
++		return -EMSGSIZE;
++	if (request->data_mode > 1 || request->ack_mode > 1)
++		return -EOPNOTSUPP;
++	if (request->data_mode == 1 &&
++	    (!request->payload || request->parameter1 > N1X_ADSP_IPC_PAYLOAD_BYTES))
++		return -EMSGSIZE;
++	n1x_adsp_ipc_put32(prepared, 2);
++	n1x_adsp_ipc_put32(prepared + 4, 16 +
++			  (request->data_mode == 1 ? request->parameter1 : 0));
++	n1x_adsp_ipc_put16(prepared + 16, request->token);
++	prepared[18] = request->channel;
++	prepared[19] = 0x10;
++	prepared[20] = request->data_mode;
++	prepared[21] = request->ack_mode;
++	n1x_adsp_ipc_put16(prepared + 22, request->command);
++	n1x_adsp_ipc_put32(prepared + 24, request->parameter1);
++	n1x_adsp_ipc_put32(prepared + 28, request->parameter2);
++	if (request->data_mode == 1)
++		memcpy(prepared + 32, request->payload, request->parameter1);
++	memcpy(packet, prepared, sizeof(prepared));
++	return 0;
++}
++
++/* Receive classification uses the inner header. The outer word0 and length
++ * fields are returned verbatim; callers must not use them as payload bounds.
++ */
++static inline int n1x_adsp_ipc_decode(struct n1x_adsp_ipc_header *header,
++				    const __u8 *packet, size_t bytes)
++{
++	if (!header || !packet)
++		return -EINVAL;
++	if (bytes != N1X_ADSP_IPC_BYTES)
++		return -EMSGSIZE;
++	*header = (struct n1x_adsp_ipc_header) {
++		.word0 = n1x_adsp_ipc_get32(packet),
++		.length = n1x_adsp_ipc_get32(packet + 4),
++		.token = n1x_adsp_ipc_get16(packet + 16),
++		.channel = packet[18],
++		.message_class = packet[19] >> 4,
++		.flags = packet[19] & 0xf,
++		.data_mode = packet[20],
++		.ack_mode = packet[21],
++		.command = n1x_adsp_ipc_get16(packet + 22),
++		.parameter1 = n1x_adsp_ipc_get32(packet + 24),
++		.parameter2 = n1x_adsp_ipc_get32(packet + 28),
++	};
++	return 0;
++}
++
++static inline bool n1x_adsp_ipc_ack_matches(const struct n1x_adsp_ipc_header *header,
++					 __u16 token)
++{
++	return header && token && header->message_class == 0 &&
++	       header->ack_mode == 2 && header->token == token;
++}
++
++#endif
+--- /dev/null
++++ b/include/sound/n1x_adsp_pcm.h
+@@ -0,0 +1,192 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef N1X_ADSP_PCM_H
++#define N1X_ADSP_PCM_H
++
++#include "n1x_adsp_ipc.h"
++
++#define N1X_ADSP_PCM_BYTES 96U
++
++struct n1x_adsp_pcm_config {
++	__u64 address;
++	__u32 bytes;
++	__u32 rate;
++	__u32 channels;
++	__u32 sample_bits;
++	__u32 period_frames;
++	__u32 periods;
++	__u8 hardware;
++	__u8 memif;
++	__u8 irq;
++};
++
++struct n1x_adsp_pcm_position {
++	__u64 notifications;
++	__u32 byte_offset, counter;
++	bool valid, at_end;
++};
++
++static inline __u64 n1x_adsp_pcm_get64(const __u8 *p)
++{
++	return (__u64)n1x_adsp_ipc_get32(p) | (__u64)n1x_adsp_ipc_get32(p + 4) << 32;
++}
++
++static inline void n1x_adsp_pcm_put64(__u8 *p, __u64 value)
++{
++	n1x_adsp_ipc_put32(p, value);
++	n1x_adsp_ipc_put32(p + 4, value >> 32);
++}
++
++/* Encode a primary-playback descriptor, without publishing it. The caller
++ * owns the complete address extent and must establish its device-visible
++ * mapping, endpoint format support and hardware memif/IRQ assignment.
++ * Sample width is the container size in bits, not an ALSA format enum.
++ * Hardware and host buffers both use wire memory-type value 1.
++ * Errors leave the destination unchanged.
++ */
++static inline int n1x_adsp_pcm_encode(__u8 *packet, size_t capacity,
++				    const struct n1x_adsp_pcm_config *config)
++{
++	__u8 prepared[N1X_ADSP_PCM_BYTES] = {};
++	__u64 frames;
++	__u32 frame_bytes;
++
++	if (!packet || !config)
++		return -EINVAL;
++	if (capacity < sizeof(prepared))
++		return -EMSGSIZE;
++	if (!config->address || !config->bytes || !config->rate ||
++	    !config->channels || config->channels > 2 ||
++	    (config->sample_bits != 16 && config->sample_bits != 32) ||
++	    !config->period_frames || config->period_frames > 0x7fffffff ||
++	    config->periods < 2 || config->periods > 0x7fffffff ||
++	    config->hardware > 1 || config->memif > 15 || config->irq > 15 ||
++	    (!config->hardware && (config->memif || config->irq)))
++		return -EINVAL;
++	frame_bytes = config->channels * (config->sample_bits / 8);
++	frames = (__u64)config->period_frames * config->periods;
++	if (frames > 0xffffffffU / frame_bytes ||
++	    config->address > ~(__u64)0 - config->bytes)
++		return -ERANGE;
++	if (config->bytes != frames * frame_bytes)
++		return -EINVAL;
++
++	n1x_adsp_pcm_put64(prepared, config->address);
++	n1x_adsp_pcm_put64(prepared + 8, config->address + config->bytes);
++	n1x_adsp_pcm_put64(prepared + 16, config->address);
++	n1x_adsp_pcm_put64(prepared + 24, config->address);
++	n1x_adsp_pcm_put64(prepared + 32, config->bytes);
++	n1x_adsp_ipc_put32(prepared + 48, config->sample_bits);
++	n1x_adsp_ipc_put32(prepared + 52, config->rate);
++	n1x_adsp_ipc_put32(prepared + 56, config->channels);
++	n1x_adsp_ipc_put32(prepared + 60, 1);
++	n1x_adsp_ipc_put32(prepared + 64, frames);
++	n1x_adsp_ipc_put32(prepared + 68, 0xffffffff);
++	n1x_adsp_ipc_put32(prepared + 72, config->period_frames);
++	n1x_adsp_ipc_put32(prepared + 76, config->periods);
++	prepared[80] = config->hardware;
++	prepared[81] = config->memif;
++	prepared[82] = config->irq;
++	prepared[83] = 1;
++	memcpy(packet, prepared, sizeof(prepared));
++	return 0;
++}
++
++/* Build a host producer publication after the client has filled its samples.
++ * Offsets include the end boundary; preserve that address in the wire record.
++ * The owner supplies its last validated read address and next write generation.
++ * Availability belongs to the stream client. This neither copies samples nor
++ * publishes memory; errors leave the destination unchanged.
++ */
++static inline int
++n1x_adsp_pcm_producer_encode(__u8 *packet, size_t capacity,
++			     const struct n1x_adsp_pcm_config *config,
++			     __u64 read_address, __u32 write_offset, __u32 counter)
++{
++	__u8 prepared[N1X_ADSP_PCM_BYTES];
++	__u32 frame_bytes;
++	int err;
++
++	if (!packet || !config)
++		return -EINVAL;
++	if (capacity < sizeof(prepared))
++		return -EMSGSIZE;
++	err = n1x_adsp_pcm_encode(prepared, sizeof(prepared), config);
++	if (err)
++		return err;
++	if (config->hardware)
++		return -EINVAL;
++	frame_bytes = config->channels * (config->sample_bits / 8);
++	if (read_address < config->address || read_address > config->address + config->bytes ||
++	    write_offset > config->bytes || counter > 0x7fffffff)
++		return -ERANGE;
++	if ((read_address - config->address) % frame_bytes || write_offset % frame_bytes)
++		return -EINVAL;
++	n1x_adsp_pcm_put64(prepared + 16, read_address);
++	n1x_adsp_pcm_put64(prepared + 24, config->address + write_offset);
++	n1x_adsp_ipc_put32(prepared + 84, counter);
++	memcpy(packet, prepared, sizeof(prepared));
++	return 0;
++}
++
++/* Decode a task-7 playback-consumed notification. Only the read pointer and
++ * producer-generation counter are consumed from the inline descriptor.
++ * The counter may restart at zero; it is not a count of elapsed periods.
++ * Equal pointers can represent another notification after a ring wrap.
++ * Errors leave the output unchanged. Outer wrapper lengths are not trusted.
++ */
++static inline int
++n1x_adsp_pcm_consume_decode(struct n1x_adsp_pcm_position *position,
++			    const struct n1x_adsp_pcm_position *previous,
++			    const struct n1x_adsp_pcm_config *config,
++			    const __u8 *packet, size_t bytes)
++{
++	struct n1x_adsp_ipc_header header;
++	struct n1x_adsp_pcm_position next;
++	__u64 address, offset;
++	__u32 counter, frame_bytes;
++	int err;
++
++	if (!position || !previous || !config)
++		return -EINVAL;
++	err = n1x_adsp_ipc_decode(&header, packet, bytes);
++	if (err)
++		return err;
++	if (header.message_class || header.ack_mode || header.channel != 7 ||
++	    header.command != 0x1b)
++		return -ENOMSG;
++	if (header.parameter2)
++		return -EOPNOTSUPP;
++	if (header.data_mode != 1 || header.parameter1 < N1X_ADSP_PCM_BYTES ||
++	    header.parameter1 > N1X_ADSP_IPC_PAYLOAD_BYTES)
++		return -EMSGSIZE;
++	if (!config->address || !config->bytes || !config->channels ||
++	    config->channels > 2 || (config->sample_bits != 16 && config->sample_bits != 32) ||
++	    config->address > ~(__u64)0 - config->bytes)
++		return -EINVAL;
++	frame_bytes = config->channels * (config->sample_bits / 8);
++	if (config->bytes % frame_bytes)
++		return -EINVAL;
++	address = n1x_adsp_pcm_get64(packet + 0x30);
++	counter = n1x_adsp_ipc_get32(packet + 0x74);
++	if (address < config->address || address > config->address + config->bytes ||
++	    counter > 0x7fffffff)
++		return -ERANGE;
++	offset = address - config->address;
++	if (offset % frame_bytes)
++		return -ERANGE;
++	if (previous->valid && counter && counter < previous->counter)
++		return -ESTALE;
++	if (previous->notifications == ~(__u64)0)
++		return -EOVERFLOW;
++	next = (struct n1x_adsp_pcm_position) {
++		.notifications = previous->notifications + 1,
++		.byte_offset = offset == config->bytes ? 0 : offset,
++		.counter = counter,
++		.valid = true,
++		.at_end = offset == config->bytes,
++	};
++	*position = next;
++	return 0;
++}
++
++#endif
+--- a/sound/soc/mediatek/Kconfig
++++ b/sound/soc/mediatek/Kconfig
+@@ -408,6 +408,7 @@
+ 	depends on ARCH_MEDIATEK && ACPI
+ 	depends on MTK_POWER_WRAP
+ 	select SND_SOC_MEDIATEK
++	select GENERIC_ALLOCATOR
+ 	help
+ 	  This adds ASoC platform driver support for MediaTek MT8901 chip
+ 	  that can be used with other codecs.
+--- a/sound/soc/mediatek/mt8901/Makefile
++++ b/sound/soc/mediatek/mt8901/Makefile
+@@ -2,6 +2,8 @@
+ 
+ snd-soc-mt8901-afe-y := \
+ 	mt8901-afe-clk.o \
++	mt8901-afe-sram.o \
++	mt8901-afe-dsp.o \
+ 	mt8901-afe-pcm.o \
+ 	mt8901-dai-soundwire.o
+ 
+--- a/sound/soc/mediatek/mt8901/mt8901-afe-common.h
++++ b/sound/soc/mediatek/mt8901/mt8901-afe-common.h
+@@ -75,7 +75,12 @@
+ 	unsigned int asys_timing_sel;
+ };
+ 
++struct mt8901_afe_sram;
++struct mt8901_afe_dsp;
++
+ struct mt8901_afe_private {
++	struct mt8901_afe_sram *sram;
++	struct mt8901_afe_dsp *dsp;
+ 	u32 hw_ver;               /* acpi-asd-hw-ver from _DSD */
+ 	struct mtk_dai_memif_irq_priv irq_priv[MT8901_AFE_IRQ_NUM];
+ 	int pm_runtime_bypass_reg_ctl;
+@@ -86,6 +91,16 @@
+ 	/* dai */
+ 	void *dai_priv[MT8901_DAI_NUM];
+ };
++
++struct platform_driver;
++extern struct platform_driver mt8901_afe_pcm_driver;
++int mt8901_afe_sram_init(struct mtk_base_afe *afe);
++bool mt8901_afe_sram_busy(struct mtk_base_afe *afe);
++
++int mt8901_afe_sram_domain(struct mtk_base_afe *afe, int id);
++
++int mt8901_afe_sram_startup(struct snd_pcm_substream *substream,
++			    struct snd_soc_dai *dai);
+ 
+ int mt8901_afe_fs_timing(struct device *dev, unsigned int rate);
+ /* dai register */
+--- /dev/null
++++ b/sound/soc/mediatek/mt8901/mt8901-afe-dsp.c
+@@ -0,0 +1,435 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <linux/err.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/slab.h>
++#include <linux/spinlock.h>
++#include <linux/workqueue.h>
++#include <sound/mt8901-afe-sram.h>
++#include <sound/n1x_adsp_client.h>
++#include <sound/soc.h>
++
++#include "mt8901-afe-common.h"
++#include "mt8901-afe-dsp.h"
++#include "../common/mtk-afe-platform-driver.h"
++
++/* The processing task also needs two independently retained 1 KiB IPC slices. */
++#define MT8901_DSP_RING_MAX (0x14000U - 2048U)
++
++static bool dsp_playback;
++module_param(dsp_playback, bool, 0400);
++MODULE_PARM_DESC(dsp_playback, "Use experimental route-2 DSP playback on DL0; disabled by default");
++
++struct mt8901_afe_dsp {
++	struct snd_pcm_substream *substream;
++	struct n1x_adsp_primary *primary;
++	struct n1x_adsp_primary_pcm_view view;
++	struct work_struct period_work;
++	spinlock_t period_lock;
++	u32 irq_offset, period_bytes, period_remainder;
++	bool period_pending;
++	int notification_error;
++	snd_pcm_uframes_t appl_ptr;
++	bool configured, prepared, listening, closing, running, samples;
++	int error;
++	typeof(n1x_adsp_primary_abi) *abi;
++	typeof(n1x_adsp_primary_open) *open;
++	typeof(n1x_adsp_primary_configure) *configure;
++	typeof(n1x_adsp_primary_prepare_pcm) *prepare;
++	typeof(n1x_adsp_primary_pcm_view) *pcm_view;
++	typeof(n1x_adsp_primary_commit) *commit;
++	typeof(n1x_adsp_primary_start) *start;
++	typeof(n1x_adsp_primary_stop) *stop;
++	typeof(n1x_adsp_primary_set_period) *set_period;
++	typeof(n1x_adsp_primary_position) *position;
++	typeof(n1x_adsp_primary_close) *close;
++};
++
++static struct mt8901_afe_dsp *mt8901_afe_dsp_get(struct snd_pcm_substream *substream)
++{
++	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
++	struct snd_soc_dai *dai = snd_soc_rtd_to_cpu(rtd, 0);
++	struct mtk_base_afe *afe = snd_soc_dai_get_drvdata(dai);
++	struct mt8901_afe_private *priv = afe->platform_priv;
++	struct mt8901_afe_dsp *dsp = priv->dsp;
++
++	return dsp && dsp->substream == substream ? dsp : NULL;
++}
++
++bool mt8901_afe_dsp_active(struct snd_pcm_substream *substream)
++{
++	return !!mt8901_afe_dsp_get(substream);
++}
++
++static void mt8901_afe_dsp_put_ops(struct mt8901_afe_dsp *dsp)
++{
++	if (dsp->abi)
++		symbol_put(n1x_adsp_primary_abi);
++	if (dsp->open)
++		symbol_put(n1x_adsp_primary_open);
++	if (dsp->configure)
++		symbol_put(n1x_adsp_primary_configure);
++	if (dsp->prepare)
++		symbol_put(n1x_adsp_primary_prepare_pcm);
++	if (dsp->pcm_view)
++		symbol_put(n1x_adsp_primary_pcm_view);
++	if (dsp->commit)
++		symbol_put(n1x_adsp_primary_commit);
++	if (dsp->start)
++		symbol_put(n1x_adsp_primary_start);
++	if (dsp->stop)
++		symbol_put(n1x_adsp_primary_stop);
++	if (dsp->set_period)
++		symbol_put(n1x_adsp_primary_set_period);
++	if (dsp->position)
++		symbol_put(n1x_adsp_primary_position);
++	if (dsp->close)
++		symbol_put(n1x_adsp_primary_close);
++}
++
++static void mt8901_afe_dsp_period_work(struct work_struct *work)
++{
++	struct mt8901_afe_dsp *dsp = container_of(work, struct mt8901_afe_dsp, period_work);
++	struct n1x_adsp_pcm_position position;
++	unsigned long flags;
++	bool pending;
++	int error;
++	int ret;
++
++	spin_lock_irqsave(&dsp->period_lock, flags);
++	pending = dsp->period_pending;
++	dsp->period_pending = false;
++	error = dsp->notification_error;
++	spin_unlock_irqrestore(&dsp->period_lock, flags);
++	if (READ_ONCE(dsp->closing) || !READ_ONCE(dsp->running))
++		return;
++	if (error) {
++		snd_pcm_stop_xrun(dsp->substream);
++		return;
++	}
++	if (!pending)
++		return;
++	ret = dsp->position(dsp->primary, &position);
++	if (ret)
++		snd_pcm_stop_xrun(dsp->substream);
++	else if (position.valid)
++		snd_pcm_period_elapsed(dsp->substream);
++}
++
++static void mt8901_afe_dsp_period(void *data,
++				 const struct n1x_adsp_pcm_position *position, int error)
++{
++	struct mt8901_afe_dsp *dsp = data;
++	unsigned long flags;
++	u32 offset, delta, bytes;
++	bool pending = false;
++
++	/* Nonatomic PCM stream locks may sleep: defer ALSA calls out of hard IRQ. */
++	if (READ_ONCE(dsp->closing) || !READ_ONCE(dsp->running))
++		return;
++	spin_lock_irqsave(&dsp->period_lock, flags);
++	if (error) {
++		dsp->notification_error = error;
++		pending = true;
++	} else if (position->valid) {
++		bytes = dsp->view.bytes;
++		offset = position->at_end ? bytes : position->byte_offset;
++		delta = offset >= dsp->irq_offset ? offset - dsp->irq_offset :
++			bytes - dsp->irq_offset + offset;
++		dsp->irq_offset = offset;
++		dsp->period_remainder += delta;
++		if (dsp->period_remainder >= dsp->period_bytes) {
++			dsp->period_remainder %= dsp->period_bytes;
++			dsp->period_pending = true;
++			pending = true;
++		}
++	}
++	spin_unlock_irqrestore(&dsp->period_lock, flags);
++	if (pending)
++		schedule_work(&dsp->period_work);
++}
++
++int mt8901_afe_dsp_startup(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
++{
++	struct mtk_base_afe *afe = snd_soc_dai_get_drvdata(dai);
++	struct mt8901_afe_private *priv = afe->platform_priv;
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct mt8901_afe_dsp *dsp;
++	struct device *dev;
++	int ret;
++
++	if (!dsp_playback || dai->id != MT8901_AFE_MEMIF_DL0 ||
++	    substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
++		return 0;
++	if (!substream->pcm->nonatomic || !priv->sram || priv->dsp)
++		return -EOPNOTSUPP;
++	dsp = kzalloc_obj(*dsp);
++	if (!dsp)
++		return -ENOMEM;
++	dsp->abi = symbol_get(n1x_adsp_primary_abi);
++	dsp->open = symbol_get(n1x_adsp_primary_open);
++	dsp->configure = symbol_get(n1x_adsp_primary_configure);
++	dsp->prepare = symbol_get(n1x_adsp_primary_prepare_pcm);
++	dsp->pcm_view = symbol_get(n1x_adsp_primary_pcm_view);
++	dsp->commit = symbol_get(n1x_adsp_primary_commit);
++	dsp->start = symbol_get(n1x_adsp_primary_start);
++	dsp->stop = symbol_get(n1x_adsp_primary_stop);
++	dsp->set_period = symbol_get(n1x_adsp_primary_set_period);
++	dsp->position = symbol_get(n1x_adsp_primary_position);
++	dsp->close = symbol_get(n1x_adsp_primary_close);
++	if (!dsp->abi || !dsp->open || !dsp->configure || !dsp->prepare || !dsp->pcm_view ||
++	    !dsp->commit || !dsp->start || !dsp->stop || !dsp->set_period ||
++	    !dsp->position || !dsp->close) {
++		ret = -EOPNOTSUPP;
++		goto free;
++	}
++	if (dsp->abi() != N1X_ADSP_PRIMARY_ABI) {
++		ret = -EOPNOTSUPP;
++		goto free;
++	}
++	runtime->hw.channels_max = min(runtime->hw.channels_max, 2U);
++	runtime->hw.buffer_bytes_max = min(runtime->hw.buffer_bytes_max, MT8901_DSP_RING_MAX);
++	runtime->hw.period_bytes_max = min(runtime->hw.period_bytes_max, MT8901_DSP_RING_MAX / 2);
++	runtime->hw.info &= ~(SNDRV_PCM_INFO_PAUSE | SNDRV_PCM_INFO_RESUME |
++			      SNDRV_PCM_INFO_NO_PERIOD_WAKEUP);
++	dev = bus_find_device_by_name(&platform_bus_type, NULL, "NVDA8303:00");
++	if (!dev) {
++		ret = -ENODEV;
++		goto free;
++	}
++	dsp->primary = dsp->open(dev);
++	put_device(dev);
++	if (IS_ERR(dsp->primary)) {
++		ret = PTR_ERR(dsp->primary);
++		goto free;
++	}
++	dsp->substream = substream;
++	INIT_WORK(&dsp->period_work, mt8901_afe_dsp_period_work);
++	spin_lock_init(&dsp->period_lock);
++	priv->dsp = dsp;
++	return 0;
++free:
++	mt8901_afe_dsp_put_ops(dsp);
++	kfree(dsp);
++	return ret;
++}
++
++int mt8901_afe_dsp_hw_params(struct snd_pcm_substream *substream)
++{
++	struct mt8901_afe_dsp *dsp = mt8901_afe_dsp_get(substream);
++
++	if (!dsp)
++		return 0;
++	if (dsp->error)
++		return dsp->error;
++	/* Reprogramming the CPU DMA ring could overwrite a published AFE address. */
++	return dsp->configured || dsp->closing ? -EALREADY : 0;
++}
++
++int mt8901_afe_dsp_prepare(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
++{
++	struct mt8901_afe_dsp *dsp = mt8901_afe_dsp_get(substream);
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct mt8901_afe_sram_buffer *buffer;
++	struct n1x_adsp_primary_pcm_params params;
++	int ret;
++
++	if (!dsp)
++		return 0;
++	if (dsp->error)
++		return dsp->error;
++	if (dsp->closing)
++		return -EALREADY;
++	if (dsp->prepared)
++		return dsp->samples ? -EALREADY : 0;
++	/* ALSA assigns runtime format/period fields after hw_params returns. */
++	if (!dsp->configured) {
++		buffer = mt8901_afe_sram_reserve(dai->dev, snd_pcm_lib_buffer_bytes(substream));
++		if (IS_ERR(buffer))
++			return PTR_ERR(buffer);
++		ret = mt8901_afe_sram_bind(buffer, substream);
++		params = (struct n1x_adsp_primary_pcm_params){
++			.rate = runtime->rate, .channels = runtime->channels,
++			.sample_bits = runtime->sample_bits,
++			.period_frames = runtime->period_size, .periods = runtime->periods,
++		};
++		if (!ret)
++			ret = dsp->configure(dsp->primary, &params, &buffer);
++		if (buffer)
++			mt8901_afe_sram_release(buffer);
++		if (ret)
++			goto failed;
++		dsp->configured = true;
++	}
++	ret = dsp->prepare(dsp->primary);
++	if (!ret)
++		ret = dsp->pcm_view(dsp->primary, &dsp->view);
++	if (!ret && (!dsp->view.area || dsp->view.bytes != snd_pcm_lib_buffer_bytes(substream)))
++		ret = -EINVAL;
++	dsp->period_bytes = frames_to_bytes(runtime, runtime->period_size);
++	if (!ret)
++		ret = dsp->set_period(dsp->primary, mt8901_afe_dsp_period, dsp);
++	if (ret)
++		goto failed;
++	dsp->listening = true;
++	dsp->appl_ptr = 0;
++	dsp->prepared = true;
++	return 0;
++failed:
++	dsp->error = ret;
++	return ret;
++}
++
++static int mt8901_afe_dsp_ack(struct snd_soc_component *component,
++			      struct snd_pcm_substream *substream)
++{
++	struct mt8901_afe_dsp *dsp = mt8901_afe_dsp_get(substream);
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	snd_pcm_uframes_t appl, delta;
++	size_t offset, bytes, first;
++	int ret;
++
++	if (!dsp)
++		return 0;
++	if (dsp->error)
++		return dsp->error;
++	if (!dsp->prepared || dsp->closing)
++		return -EBADFD;
++	appl = READ_ONCE(runtime->control->appl_ptr);
++	if (appl >= runtime->boundary || dsp->appl_ptr >= runtime->boundary)
++		return -EINVAL;
++	delta = appl >= dsp->appl_ptr ? appl - dsp->appl_ptr :
++		runtime->boundary - dsp->appl_ptr + appl;
++	if (!delta)
++		return 0;
++	/* Reject rewinds and advances beyond the ring; ALSA owns availability. */
++	if (delta > runtime->buffer_size)
++		return -EINVAL;
++	offset = frames_to_bytes(runtime, dsp->appl_ptr % runtime->buffer_size);
++	bytes = frames_to_bytes(runtime, delta);
++	first = min(bytes, dsp->view.bytes - offset);
++	memcpy(dsp->view.area + offset, runtime->dma_area + offset, first);
++	if (bytes > first)
++		memcpy(dsp->view.area, runtime->dma_area, bytes - first);
++	offset = frames_to_bytes(runtime, appl % runtime->buffer_size);
++	/* Preserve the full-ring boundary; base would describe an empty ring. */
++	ret = dsp->commit(dsp->primary, offset ? offset : dsp->view.bytes);
++	if (ret)
++		dsp->error = ret;
++	else {
++		dsp->appl_ptr = appl;
++		dsp->samples = true;
++	}
++	return ret;
++}
++
++static snd_pcm_uframes_t mt8901_afe_dsp_pointer(struct snd_soc_component *component,
++					     struct snd_pcm_substream *substream)
++{
++	struct mt8901_afe_dsp *dsp = mt8901_afe_dsp_get(substream);
++	struct n1x_adsp_pcm_position position;
++	int ret;
++
++	if (!dsp)
++		return mtk_afe_pcm_pointer(component, substream);
++	if (dsp->error || dsp->closing)
++		return SNDRV_PCM_POS_XRUN;
++	if (!dsp->prepared)
++		return 0;
++	ret = dsp->position(dsp->primary, &position);
++	if (ret)
++		return SNDRV_PCM_POS_XRUN;
++	return position.valid ? bytes_to_frames(substream->runtime, position.byte_offset) : 0;
++}
++
++int mt8901_afe_dsp_trigger(struct snd_pcm_substream *substream, int command)
++{
++	struct mt8901_afe_dsp *dsp = mt8901_afe_dsp_get(substream);
++	int ret;
++
++	if (!dsp || !dsp->prepared || dsp->closing)
++		return -EBADFD;
++	switch (command) {
++	case SNDRV_PCM_TRIGGER_START:
++		if (dsp->error)
++			return dsp->error;
++		WRITE_ONCE(dsp->running, true);
++		ret = dsp->start(dsp->primary);
++		if (ret)
++			WRITE_ONCE(dsp->running, false);
++		break;
++	case SNDRV_PCM_TRIGGER_STOP:
++	case SNDRV_PCM_TRIGGER_SUSPEND:
++		WRITE_ONCE(dsp->running, false);
++		ret = dsp->stop(dsp->primary);
++		break;
++	default:
++		return -EINVAL;
++	}
++	if (ret)
++		dsp->error = ret;
++	return ret;
++}
++
++static int mt8901_afe_dsp_sync_stop(struct snd_soc_component *component,
++				    struct snd_pcm_substream *substream)
++{
++	struct mt8901_afe_dsp *dsp = mt8901_afe_dsp_get(substream);
++
++	/* ALSA calls sync_stop outside its stream lock. STOP only disables queuing. */
++	if (dsp)
++		cancel_work_sync(&dsp->period_work);
++	else if (substream->pcm->card->sync_irq > 0)
++		synchronize_irq(substream->pcm->card->sync_irq);
++	return 0;
++}
++
++int mt8901_afe_dsp_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
++{
++	struct mt8901_afe_dsp *dsp = mt8901_afe_dsp_get(substream);
++	int ret = 0;
++
++	if (!dsp || dsp->closing)
++		return 0;
++	WRITE_ONCE(dsp->closing, true);
++	WRITE_ONCE(dsp->running, false);
++	/* Drain both IRQ callbacks and queued users of the primary handle. */
++	if (dsp->primary && dsp->listening)
++		dsp->set_period(dsp->primary, NULL, NULL);
++	cancel_work_sync(&dsp->period_work);
++	/* close retires the borrowed AFE substream even after a task error. */
++	if (dsp->primary) {
++		ret = dsp->close(dsp->primary);
++		dsp->primary = NULL;
++	}
++	return ret;
++}
++
++void mt8901_afe_dsp_shutdown(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
++{
++	struct mtk_base_afe *afe = snd_soc_dai_get_drvdata(dai);
++	struct mt8901_afe_private *priv = afe->platform_priv;
++	struct mt8901_afe_dsp *dsp = mt8901_afe_dsp_get(substream);
++
++	if (!dsp)
++		return;
++	mt8901_afe_dsp_hw_free(substream, dai);
++	priv->dsp = NULL;
++	mt8901_afe_dsp_put_ops(dsp);
++	kfree(dsp);
++}
++
++static int mt8901_afe_dsp_component_probe(struct snd_soc_component *component)
++{
++	return mtk_afe_pcm_platform.probe(component);
++}
++
++const struct snd_soc_component_driver mt8901_afe_dsp_platform = {
++	.name = AFE_PCM_NAME,
++	.pointer = mt8901_afe_dsp_pointer,
++	.ack = mt8901_afe_dsp_ack,
++	.sync_stop = mt8901_afe_dsp_sync_stop,
++	.pcm_new = mtk_afe_pcm_new,
++	.probe = mt8901_afe_dsp_component_probe,
++};
+--- /dev/null
++++ b/sound/soc/mediatek/mt8901/mt8901-afe-dsp.h
+@@ -0,0 +1,21 @@
++/* SPDX-License-Identifier: GPL-2.0-only */
++#ifndef MT8901_AFE_DSP_H
++#define MT8901_AFE_DSP_H
++
++#include <sound/pcm.h>
++
++struct mtk_base_afe;
++struct snd_soc_dai;
++struct snd_soc_component;
++struct snd_soc_component_driver;
++
++int mt8901_afe_dsp_startup(struct snd_pcm_substream *substream, struct snd_soc_dai *dai);
++int mt8901_afe_dsp_hw_params(struct snd_pcm_substream *substream);
++int mt8901_afe_dsp_prepare(struct snd_pcm_substream *substream, struct snd_soc_dai *dai);
++bool mt8901_afe_dsp_active(struct snd_pcm_substream *substream);
++int mt8901_afe_dsp_trigger(struct snd_pcm_substream *substream, int command);
++int mt8901_afe_dsp_hw_free(struct snd_pcm_substream *substream, struct snd_soc_dai *dai);
++void mt8901_afe_dsp_shutdown(struct snd_pcm_substream *substream, struct snd_soc_dai *dai);
++extern const struct snd_soc_component_driver mt8901_afe_dsp_platform;
++
++#endif
+--- a/sound/soc/mediatek/mt8901/mt8901-afe-pcm.c
++++ b/sound/soc/mediatek/mt8901/mt8901-afe-pcm.c
+@@ -15,6 +15,7 @@
+ #include <sound/pcm_params.h>
+ #include "mt8901-afe-common.h"
+ #include "mt8901-afe-clk.h"
++#include "mt8901-afe-dsp.h"
+ #include "mt8901-reg.h"
+ #include "../common/mtk-afe-platform-driver.h"
+ #include "../common/mtk-afe-fe-dai.h"
+@@ -531,7 +532,14 @@
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+ 	int ret;
+ 
+-	ret = mtk_afe_fe_startup(substream, dai);
++	ret = mt8901_afe_sram_startup(substream, dai);
++	if (ret < 0)
++		return ret;
++	ret = mt8901_afe_dsp_startup(substream, dai);
++	if (ret) {
++		mtk_afe_fe_shutdown(substream, dai);
++		return ret;
++	}
+ 
+ 	snd_pcm_hw_constraint_step(runtime, 0,
+ 				   SNDRV_PCM_HW_PARAM_BUFFER_BYTES,
+@@ -553,6 +561,11 @@
+ 	unsigned int channels = params_channels(params);
+ 	unsigned int rate = params_rate(params);
+ 	unsigned int domain = memif_priv->domain;
++	int ret;
++
++	ret = mt8901_afe_dsp_hw_params(substream);
++	if (ret)
++		return ret;
+ 
+ 	mt8901_afe_config_cm(afe, cm, channels, rate, domain);
+ 
+@@ -563,6 +576,21 @@
+ 	mt8901_memif_set_maxlen(afe, id, memif_priv->maxlen);
+ 
+ 	return mtk_afe_fe_hw_params(substream, params, dai);
++}
++
++int mt8901_afe_sram_domain(struct mtk_base_afe *afe, int id)
++{
++	struct mt8901_afe_private *priv = afe->platform_priv;
++	struct mtk_dai_memif_priv *memif;
++
++	if (id < 0 || id >= MT8901_AFE_MEMIF_UL_START)
++		return -EINVAL;
++	memif = priv->dai_priv[id];
++	if (!memif)
++		return -ENODEV;
++	if (memif->domain > 7)
++		return -ERANGE;
++	return memif->domain;
+ }
+ 
+ static int mt8901_afe_fe_trigger(struct snd_pcm_substream *substream, int cmd,
+@@ -582,6 +610,9 @@
+ 	int fs;
+ 	int ret;
+ 
++	if (mt8901_afe_dsp_active(substream))
++		return mt8901_afe_dsp_trigger(substream, cmd);
++
+ 	switch (cmd) {
+ 	case SNDRV_PCM_TRIGGER_START:
+ 	case SNDRV_PCM_TRIGGER_RESUME:
+@@ -635,12 +666,36 @@
+ 	}
+ }
+ 
++static int mt8901_afe_fe_prepare(struct snd_pcm_substream *substream,
++				  struct snd_soc_dai *dai)
++{
++	int ret = mtk_afe_fe_prepare(substream, dai);
++
++	return ret ? ret : mt8901_afe_dsp_prepare(substream, dai);
++}
++
++static int mt8901_afe_fe_hw_free(struct snd_pcm_substream *substream,
++				  struct snd_soc_dai *dai)
++{
++	int ret = mt8901_afe_dsp_hw_free(substream, dai);
++	int free_ret = mtk_afe_fe_hw_free(substream, dai);
++
++	return ret ? ret : free_ret;
++}
++
++static void mt8901_afe_fe_shutdown(struct snd_pcm_substream *substream,
++				    struct snd_soc_dai *dai)
++{
++	mt8901_afe_dsp_shutdown(substream, dai);
++	mtk_afe_fe_shutdown(substream, dai);
++}
++
+ static const struct snd_soc_dai_ops mt8901_afe_fe_dai_ops = {
+ 	.startup	= mt8901_afe_fe_startup,
+-	.shutdown	= mtk_afe_fe_shutdown,
++	.shutdown	= mt8901_afe_fe_shutdown,
+ 	.hw_params	= mt8901_afe_fe_hw_params,
+-	.hw_free	= mtk_afe_fe_hw_free,
+-	.prepare	= mtk_afe_fe_prepare,
++	.hw_free	= mt8901_afe_fe_hw_free,
++	.prepare	= mt8901_afe_fe_prepare,
+ 	.trigger	= mt8901_afe_fe_trigger,
+ };
+ 
+@@ -1923,6 +1978,10 @@
+ 	int ret;
+ 	bool skip = false;
+ 
++	/* Forced system suspend ignores the lease's runtime-PM vote. */
++	if (mt8901_afe_sram_busy(afe))
++		return -EBUSY;
++
+ 	if (!afe->regmap || afe_priv->pm_runtime_bypass_reg_ctl) {
+ 		skip = true;
+ 		goto skip_regmap;
+@@ -2138,6 +2197,10 @@
+ 	afe->memif_32bit_supported = 1;
+ 
+ 	platform_set_drvdata(pdev, afe);
++
++	ret = mt8901_afe_sram_init(afe);
++	if (ret)
++		dev_warn(dev, "AFE SRAM unavailable: %d\n", ret);
+ 
+ 	device_property_read_u32(dev, "acpi-asd-hw-ver", &afe_priv->hw_ver);
+ 
+@@ -2260,7 +2323,7 @@
+ 		afe_priv->default_mtcmos_vote_dropped = true;
+ 
+ 	/* Publish the component only once the PM baseline is established. */
+-	ret = devm_snd_soc_register_component(dev, &mtk_afe_pcm_platform,
++	ret = devm_snd_soc_register_component(dev, &mt8901_afe_dsp_platform,
+ 					      afe->dai_drivers,
+ 					      afe->num_dai_drivers);
+ 	if (ret) {
+@@ -2330,9 +2393,11 @@
+ 		       mt8901_afe_runtime_resume, NULL)
+ };
+ 
+-static struct platform_driver mt8901_afe_pcm_driver = {
++struct platform_driver mt8901_afe_pcm_driver = {
+ 	.driver = {
+ 		   .name = "mt8901-audio",
++		   /* SRAM consumers require stable driver ownership. */
++		   .suppress_bind_attrs = true,
+ 		   .acpi_match_table = ACPI_PTR(mt8901_afe_acpi_match),
+ 		   .pm = &mt8901_afe_pm_ops,
+ 	},
+--- /dev/null
++++ b/sound/soc/mediatek/mt8901/mt8901-afe-sram.c
+@@ -0,0 +1,650 @@
++// SPDX-License-Identifier: GPL-2.0-only
++#include <linux/atomic.h>
++#include <linux/dmi.h>
++#include <linux/err.h>
++#include <linux/genalloc.h>
++#include <linux/io.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
++#include <linux/property.h>
++#include <linux/regmap.h>
++#include <linux/slab.h>
++#include <sound/mt8901-afe-sram.h>
++
++#include "mt8901-afe-common.h"
++#include "mt8901-reg.h"
++#include "../common/mtk-afe-fe-dai.h"
++
++#define MT8901_SRAM_BYTES 0x14000
++#define MT8901_SRAM_ALIGN 16
++
++struct mt8901_afe_sram {
++	struct gen_pool *pool;
++	void __iomem *base;
++	u32 cpu, vad, dsp;
++	atomic_t users;
++	struct mt8901_afe_sram_buffer *memif[MT8901_AFE_MEMIF_NUM];
++};
++
++struct mt8901_afe_sram_buffer {
++	struct device *dev;
++	struct mt8901_afe_sram *sram;
++	unsigned long address;
++	size_t bytes;
++	bool published, ipc;
++	bool prepared, irq_prepared, irq_stopped;
++	int prepare_error, irq_error, irq_stop_error;
++	struct snd_pcm_substream *substream;
++	struct mt8901_afe_sram_endpoint endpoint;
++};
++
++static void mt8901_afe_sram_destroy(void *data)
++{
++	struct mt8901_afe_sram *sram = data;
++
++	/* Leases pin the module; driver bind attributes are suppressed. */
++	if (WARN_ON(atomic_read(&sram->users)))
++		return;
++	gen_pool_destroy(sram->pool);
++}
++
++int mt8901_afe_sram_init(struct mtk_base_afe *afe)
++{
++	static const struct {
++		const char *name;
++		u32 expected;
++	} properties[] = {
++		{"acpi-asd-sram-size", MT8901_SRAM_BYTES},
++		{"acpi-asd-sram-cpu-view", 0x1a6c0000},
++		{"acpi-asd-sram-vad-view", 0x1a6c0000},
++		{"acpi-asd-sram-adsp-view", 0x4e5c0000},
++	};
++	struct mt8901_afe_private *priv = afe->platform_priv;
++	struct device *dev = afe->dev;
++	struct mt8901_afe_sram *sram;
++	struct fwnode_handle *node;
++	struct resource resource;
++	u32 values[ARRAY_SIZE(properties)], count, version;
++	void *group;
++	unsigned int i;
++	int ret;
++
++	if (!dmi_match(DMI_PRODUCT_NAME, "ProArt P16 H7607BA") ||
++	    !dmi_match(DMI_BIOS_VERSION, "H7607BA.300"))
++		return 0;
++	ret = device_property_read_u32(dev, "acpi-asd-hw-ver", &version);
++	if (ret)
++		return ret;
++	ret = device_property_read_u32(dev, "acpi-asd-sram-resource-list", &count);
++	if (ret)
++		return ret;
++	if (version != 1 || count != 1)
++		return -ENODEV;
++	node = device_get_named_child_node(dev, "acpi-asd-afe-sram-subproperties");
++	if (!node)
++		return -ENODEV;
++	for (i = 0; i < ARRAY_SIZE(properties); i++) {
++		ret = fwnode_property_read_u32(node, properties[i].name, &values[i]);
++		if (ret)
++			break;
++		if (values[i] != properties[i].expected) {
++			ret = -ENODEV;
++			break;
++		}
++	}
++	fwnode_handle_put(node);
++	if (ret)
++		return ret;
++	group = devres_open_group(dev, NULL, GFP_KERNEL);
++	if (!group)
++		return -ENOMEM;
++	sram = devm_kzalloc(dev, sizeof(*sram), GFP_KERNEL);
++	if (!sram) {
++		ret = -ENOMEM;
++		goto release;
++	}
++	resource = (struct resource)DEFINE_RES_MEM(values[1], values[0]);
++	resource.name = "mt8901-afe-sram";
++	sram->base = devm_ioremap_resource(dev, &resource);
++	if (IS_ERR(sram->base)) {
++		ret = PTR_ERR(sram->base);
++		goto release;
++	}
++	sram->pool = gen_pool_create(4, NUMA_NO_NODE);
++	if (!sram->pool) {
++		ret = -ENOMEM;
++		goto release;
++	}
++	ret = gen_pool_add_virt(sram->pool, (unsigned long)sram->base,
++				values[1], values[0], NUMA_NO_NODE);
++	if (ret) {
++		gen_pool_destroy(sram->pool);
++		goto release;
++	}
++	atomic_set(&sram->users, 0);
++	sram->cpu = values[1];
++	sram->vad = values[2];
++	sram->dsp = values[3];
++	ret = devm_add_action_or_reset(dev, mt8901_afe_sram_destroy, sram);
++	if (ret)
++		goto release;
++	priv->sram = sram;
++	devres_close_group(dev, group);
++	return 0;
++release:
++	devres_release_group(dev, group);
++	return ret;
++}
++
++bool mt8901_afe_sram_busy(struct mtk_base_afe *afe)
++{
++	struct mt8901_afe_private *priv = afe->platform_priv;
++
++	return priv->sram && atomic_read(&priv->sram->users);
++}
++
++struct mt8901_afe_sram_buffer *mt8901_afe_sram_reserve(struct device *dev, size_t bytes)
++{
++	struct mt8901_afe_sram_buffer *buffer;
++	struct mt8901_afe_private *priv;
++	struct mtk_base_afe *afe;
++	unsigned long address;
++	int ret;
++
++	if (!dev || !bytes || bytes > MT8901_SRAM_BYTES || !IS_ALIGNED(bytes, MT8901_SRAM_ALIGN))
++		return ERR_PTR(-EINVAL);
++	buffer = kzalloc_obj(*buffer);
++	if (!buffer)
++		return ERR_PTR(-ENOMEM);
++	device_lock(dev);
++	if (dev->driver != &mt8901_afe_pcm_driver.driver) {
++		ret = -ENODEV;
++		goto unlock;
++	}
++	afe = dev_get_drvdata(dev);
++	priv = afe->platform_priv;
++	if (!priv->sram) {
++		ret = -EOPNOTSUPP;
++		goto unlock;
++	}
++	if (!try_module_get(THIS_MODULE)) {
++		ret = -ENODEV;
++		goto unlock;
++	}
++	if (!pm_runtime_enabled(dev)) {
++		ret = -EHOSTDOWN;
++		goto put_module;
++	}
++	ret = pm_runtime_resume_and_get(dev);
++	if (ret < 0)
++		goto put_module;
++	address = gen_pool_alloc(priv->sram->pool, bytes);
++	if (!address) {
++		ret = -ENOMEM;
++		pm_runtime_put(dev);
++		goto put_module;
++	}
++	memset_io((void __iomem *)address, 0, bytes);
++	buffer->dev = get_device(dev);
++	buffer->sram = priv->sram;
++	buffer->address = address;
++	buffer->bytes = bytes;
++	atomic_inc(&priv->sram->users);
++	device_unlock(dev);
++	return buffer;
++put_module:
++	module_put(THIS_MODULE);
++unlock:
++	device_unlock(dev);
++	kfree(buffer);
++	return ERR_PTR(ret);
++}
++EXPORT_SYMBOL_GPL(mt8901_afe_sram_reserve);
++
++struct mt8901_afe_sram_buffer *
++mt8901_afe_sram_reserve_ipc(struct mt8901_afe_sram_buffer *peer, size_t bytes)
++{
++	struct mt8901_afe_sram_buffer *buffer;
++
++	if (IS_ERR_OR_NULL(peer) || peer->ipc || !peer->substream ||
++	    !bytes || bytes > 4096 || !IS_ALIGNED(bytes, 1024))
++		return ERR_PTR(-EINVAL);
++	buffer = mt8901_afe_sram_reserve(peer->dev, bytes);
++	if (!IS_ERR(buffer))
++		buffer->ipc = true;
++	return buffer;
++}
++EXPORT_SYMBOL_GPL(mt8901_afe_sram_reserve_ipc);
++
++int mt8901_afe_sram_publish_ipc(struct mt8901_afe_sram_buffer *buffer)
++{
++	int ret = 0;
++
++	if (IS_ERR_OR_NULL(buffer))
++		return -EINVAL;
++	device_lock(buffer->dev);
++	if (buffer->dev->driver != &mt8901_afe_pcm_driver.driver)
++		ret = -ENODEV;
++	else if (!buffer->ipc || buffer->substream)
++		ret = -EINVAL;
++	else {
++		/* Publish complete IPC SRAM contents before a firmware registration. */
++		wmb();
++		buffer->published = true;
++	}
++	device_unlock(buffer->dev);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(mt8901_afe_sram_publish_ipc);
++
++int mt8901_afe_sram_view(struct mt8901_afe_sram_buffer *buffer,
++			struct mt8901_afe_sram_view *view)
++{
++	unsigned long offset;
++
++	if (IS_ERR_OR_NULL(buffer) || !view)
++		return -EINVAL;
++	offset = buffer->address - (unsigned long)buffer->sram->base;
++	view->area = (void __iomem *)buffer->address;
++	view->cpu_address = (u64)buffer->sram->cpu + offset;
++	view->afe_address = (u64)buffer->sram->vad + offset;
++	view->dsp_address = (u64)buffer->sram->dsp + offset;
++	view->bytes = buffer->bytes;
++	return 0;
++}
++EXPORT_SYMBOL_GPL(mt8901_afe_sram_view);
++
++int mt8901_afe_sram_startup(struct snd_pcm_substream *substream, struct snd_soc_dai *dai)
++{
++	struct mtk_base_afe *afe = snd_soc_dai_get_drvdata(dai);
++	struct mt8901_afe_private *priv = afe->platform_priv;
++	int ret;
++
++	if (dai->id < 0 || dai->id >= MT8901_AFE_MEMIF_NUM)
++		return -EINVAL;
++	device_lock(afe->dev);
++	if (priv->sram && priv->sram->memif[dai->id])
++		ret = -EBUSY;
++	else
++		ret = mtk_afe_fe_startup(substream, dai);
++	device_unlock(afe->dev);
++	return ret;
++}
++
++int mt8901_afe_sram_bind(struct mt8901_afe_sram_buffer *buffer,
++			struct snd_pcm_substream *substream)
++{
++	struct mt8901_afe_sram_endpoint endpoint = {.abi_version = 2};
++	struct snd_pcm_runtime *runtime;
++	struct snd_soc_dai *dai;
++	struct mtk_base_afe *afe;
++	u64 frames;
++	u32 frame_bytes;
++	int ret = 0, id, irq;
++
++	if (IS_ERR_OR_NULL(buffer) || buffer->ipc || !substream || !substream->runtime ||
++	    substream->stream != SNDRV_PCM_STREAM_PLAYBACK)
++		return -EINVAL;
++	runtime = substream->runtime;
++	if (snd_pcm_running(substream))
++		return -EBUSY;
++	if (!runtime->rate || !runtime->channels || runtime->channels > 2 ||
++	    (runtime->sample_bits != 16 && runtime->sample_bits != 32) ||
++	    !runtime->period_size || runtime->period_size > 0x7fffffff ||
++	    runtime->periods < 2 || runtime->periods > 0x7fffffff)
++		return -EINVAL;
++	frame_bytes = runtime->channels * (runtime->sample_bits / 8);
++	frames = (u64)runtime->period_size * runtime->periods;
++	if (frames > 0xffffffffU / frame_bytes)
++		return -ERANGE;
++	if (frames * frame_bytes != buffer->bytes)
++		return -EINVAL;
++	dai = snd_soc_rtd_to_cpu(snd_soc_substream_to_rtd(substream), 0);
++	id = dai->id;
++	device_lock(buffer->dev);
++	if (buffer->dev->driver != &mt8901_afe_pcm_driver.driver || dai->dev != buffer->dev) {
++		ret = -ENODEV;
++		goto unlock;
++	}
++	afe = dev_get_drvdata(buffer->dev);
++	if (id < 0 || id >= MT8901_AFE_MEMIF_UL_START || id >= afe->memif_size ||
++	    snd_soc_dai_get_drvdata(dai) != afe || afe->memif[id].substream != substream) {
++		ret = -EBUSY;
++		goto unlock;
++	}
++	irq = afe->memif[id].irq_usage;
++	if (irq != id || irq >= afe->irqs_size || !afe->irqs[irq].irq_occupyed ||
++	    buffer->substream || buffer->published || buffer->sram->memif[id]) {
++		ret = -EBUSY;
++		goto unlock;
++	}
++	mt8901_afe_sram_view(buffer, &endpoint.memory);
++	endpoint.rate = runtime->rate;
++	endpoint.channels = runtime->channels;
++	endpoint.sample_bits = runtime->sample_bits;
++	endpoint.period_frames = runtime->period_size;
++	endpoint.periods = runtime->periods;
++	endpoint.memif = id;
++	endpoint.irq = irq;
++	buffer->endpoint = endpoint;
++	buffer->substream = substream;
++	buffer->sram->memif[id] = buffer;
++unlock:
++	device_unlock(buffer->dev);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(mt8901_afe_sram_bind);
++
++static bool mt8901_afe_sram_endpoint_valid(struct mt8901_afe_sram_buffer *buffer,
++					 struct mtk_base_afe *afe, bool allow_running)
++{
++	struct snd_pcm_runtime *runtime;
++	struct mt8901_afe_sram_endpoint *endpoint = &buffer->endpoint;
++
++	if (afe->memif[endpoint->memif].substream != buffer->substream)
++		return false;
++	runtime = buffer->substream->runtime;
++	return runtime && (allow_running || !snd_pcm_running(buffer->substream)) &&
++	       runtime->rate == endpoint->rate && runtime->channels == endpoint->channels &&
++	       runtime->sample_bits == endpoint->sample_bits &&
++	       runtime->period_size == endpoint->period_frames &&
++	       runtime->periods == endpoint->periods;
++}
++
++int mt8901_afe_sram_endpoint(struct mt8901_afe_sram_buffer *buffer,
++			    struct mt8901_afe_sram_endpoint *endpoint, size_t bytes)
++{
++	struct mtk_base_afe *afe;
++	int ret = 0;
++
++	if (IS_ERR_OR_NULL(buffer) || !endpoint || bytes != sizeof(*endpoint))
++		return -EINVAL;
++	device_lock(buffer->dev);
++	if (buffer->dev->driver != &mt8901_afe_pcm_driver.driver || !buffer->substream) {
++		ret = -ENODEV;
++		goto unlock;
++	}
++	afe = dev_get_drvdata(buffer->dev);
++	if (!mt8901_afe_sram_endpoint_valid(buffer, afe, false)) {
++		ret = -EBUSY;
++		goto unlock;
++	}
++	*endpoint = buffer->endpoint;
++	endpoint->published = buffer->published;
++	endpoint->irq_prepared = buffer->irq_prepared;
++unlock:
++	device_unlock(buffer->dev);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(mt8901_afe_sram_endpoint);
++
++static int mt8901_afe_sram_prepare_owner(struct mt8901_afe_sram_buffer *buffer,
++					struct mtk_base_afe **owner, bool allow_running)
++{
++	struct mtk_base_afe *afe;
++	struct snd_soc_dai *dai;
++
++	if (buffer->dev->driver != &mt8901_afe_pcm_driver.driver ||
++	    !buffer->substream || !buffer->published)
++		return -ENODEV;
++	afe = dev_get_drvdata(buffer->dev);
++	if (!mt8901_afe_sram_endpoint_valid(buffer, afe, allow_running))
++		return -EBUSY;
++	dai = snd_soc_rtd_to_cpu(snd_soc_substream_to_rtd(buffer->substream), 0);
++	if (dai->dev != buffer->dev || dai->id != buffer->endpoint.memif ||
++	    snd_soc_dai_get_drvdata(dai) != afe ||
++	    buffer->sram->memif[dai->id] != buffer ||
++	    afe->memif[dai->id].irq_usage != buffer->endpoint.irq ||
++	    !afe->irqs[buffer->endpoint.irq].irq_occupyed)
++		return -EBUSY;
++	*owner = afe;
++	return 0;
++}
++
++int mt8901_afe_sram_prepare(struct mt8901_afe_sram_buffer *buffer)
++{
++	struct mtk_base_afe_memif *memif;
++	const struct mtk_base_memif_data *data;
++	struct mtk_base_afe *afe;
++	int registers[4];
++	u32 values[4];
++	unsigned int i;
++	int ret;
++
++	if (IS_ERR_OR_NULL(buffer) || buffer->ipc)
++		return -EINVAL;
++	device_lock(buffer->dev);
++	ret = mt8901_afe_sram_prepare_owner(buffer, &afe, false);
++	if (ret)
++		goto unlock;
++	ret = buffer->prepare_error;
++	if (ret || buffer->prepared)
++		goto unlock;
++	memif = &afe->memif[buffer->endpoint.memif];
++	data = memif->data;
++	/* This MT8901 layout uses separate base/end MSBs and no prepare callback. */
++	if (!data || data->msb_reg > 0 || data->msb_end_reg > 0 ||
++	    afe->get_memif_pbuf_size || buffer->endpoint.memory.afe_address > U32_MAX ||
++	    buffer->endpoint.memory.afe_address + buffer->bytes - 1 > U32_MAX) {
++		ret = -EOPNOTSUPP;
++		goto unlock;
++	}
++	registers[0] = data->reg_ofs_base;
++	registers[1] = data->reg_ofs_end;
++	registers[2] = data->reg_ofs_base_msb;
++	registers[3] = data->reg_ofs_end_msb;
++	for (i = 0; i < ARRAY_SIZE(registers); i++) {
++		if (registers[i] <= 0 || !IS_ALIGNED(registers[i], 4)) {
++			ret = -EOPNOTSUPP;
++			goto unlock;
++		}
++	}
++	values[0] = buffer->endpoint.memory.afe_address;
++	values[1] = values[0] + buffer->bytes - 1;
++	values[2] = 0;
++	values[3] = 0;
++	/* The shared address helper discards write errors. Stop at the first one. */
++	for (i = 0; i < ARRAY_SIZE(registers); i++) {
++		ret = regmap_write(afe->regmap, registers[i], values[i]);
++		if (ret) {
++			buffer->prepare_error = ret;
++			goto unlock;
++		}
++	}
++	memif->dma_area = (void __force *)buffer->endpoint.memory.area;
++	memif->dma_addr = buffer->endpoint.memory.afe_address;
++	memif->dma_bytes = buffer->bytes;
++	buffer->prepared = true;
++unlock:
++	device_unlock(buffer->dev);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(mt8901_afe_sram_prepare);
++
++int mt8901_afe_sram_prepare_irq(struct mt8901_afe_sram_buffer *buffer)
++{
++	const struct mtk_base_irq_data *irq;
++	struct mtk_base_afe *afe;
++	u32 control;
++	int ret, fs, domain, cfg;
++
++	if (IS_ERR_OR_NULL(buffer) || buffer->ipc)
++		return -EINVAL;
++	device_lock(buffer->dev);
++	ret = mt8901_afe_sram_prepare_owner(buffer, &afe, false);
++	if (ret)
++		goto unlock;
++	if (buffer->irq_stopped) {
++		ret = -EALREADY;
++		goto unlock;
++	}
++	ret = buffer->prepare_error ?: buffer->irq_error ?: buffer->irq_stop_error;
++	if (ret || buffer->irq_prepared)
++		goto unlock;
++	if (!buffer->prepared) {
++		ret = -EINVAL;
++		goto unlock;
++	}
++	irq = afe->irqs[buffer->endpoint.irq].irq_data;
++	cfg = AFE_IRQ0_MCU_CFG0 + buffer->endpoint.irq * 8;
++	if (!irq || !afe->irq_fs || irq->id != buffer->endpoint.irq ||
++	    irq->irq_fs_reg != cfg || irq->irq_fs_shift != 4 || irq->irq_fs_maskbit != 0x1f ||
++	    irq->irq_domain_reg != cfg || irq->irq_domain_shift != 9 ||
++	    irq->irq_domain_maskbit != 7 || irq->irq_cnt_reg != cfg + 4 ||
++	    irq->irq_cnt_shift || irq->irq_cnt_maskbit != 0xffffff ||
++	    irq->irq_en_reg != cfg || irq->irq_en_shift) {
++		ret = -EOPNOTSUPP;
++		goto unlock;
++	}
++	fs = afe->irq_fs(buffer->substream, buffer->endpoint.rate);
++	domain = mt8901_afe_sram_domain(afe, buffer->endpoint.memif);
++	if (fs < 0 || domain < 0) {
++		ret = fs < 0 ? fs : domain;
++		goto unlock;
++	}
++	if (fs > 0x1f || domain > 7 || buffer->endpoint.period_frames > 0xffffff) {
++		ret = -ERANGE;
++		goto unlock;
++	}
++	ret = regmap_read(afe->regmap, cfg, &control);
++	if (ret)
++		goto unlock;
++	if (control & BIT(irq->irq_en_shift)) {
++		ret = -EBUSY;
++		goto unlock;
++	}
++	ret = regmap_update_bits(afe->regmap, cfg + 4, 0xffffff,
++				 buffer->endpoint.period_frames);
++	if (!ret)
++		ret = regmap_update_bits(afe->regmap, cfg, 0x1f << 4, fs << 4);
++	if (!ret)
++		ret = regmap_update_bits(afe->regmap, cfg, 7 << 9, domain << 9);
++	if (ret) {
++		buffer->irq_error = ret;
++		goto unlock;
++	}
++	buffer->irq_prepared = true;
++unlock:
++	device_unlock(buffer->dev);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(mt8901_afe_sram_prepare_irq);
++
++int mt8901_afe_sram_stop_irq(struct mt8901_afe_sram_buffer *buffer, unsigned int core)
++{
++	const struct mtk_base_irq_data *irq;
++	struct mtk_base_afe *afe;
++	u32 bit, clear;
++	int cfg, ret;
++
++	if (IS_ERR_OR_NULL(buffer) || buffer->ipc)
++		return -EINVAL;
++	/* The route-2 playback client runs on native core enum 3 (HiFi1). */
++	if (core != 3)
++		return -EOPNOTSUPP;
++	device_lock(buffer->dev);
++	ret = mt8901_afe_sram_prepare_owner(buffer, &afe, true);
++	if (ret)
++		goto unlock;
++	ret = buffer->prepare_error ?: buffer->irq_error ?: buffer->irq_stop_error;
++	if (ret || buffer->irq_stopped)
++		goto unlock;
++	if (!buffer->irq_prepared) {
++		ret = -EINVAL;
++		goto unlock;
++	}
++	irq = afe->irqs[buffer->endpoint.irq].irq_data;
++	cfg = AFE_IRQ0_MCU_CFG0 + buffer->endpoint.irq * 8;
++	if (!irq || irq->id != buffer->endpoint.irq ||
++	    irq->irq_en_reg != cfg || irq->irq_en_shift ||
++	    irq->irq_clr_reg != cfg + 4 || irq->irq_clr_shift != 31 ||
++	    irq->irq_mask_reg != AFE_IRQ_MCU_EN ||
++	    irq->irq_mask_shift != buffer->endpoint.irq) {
++		ret = -EOPNOTSUPP;
++		goto unlock;
++	}
++	bit = BIT(buffer->endpoint.irq);
++	buffer->irq_prepared = false;
++	ret = regmap_update_bits(afe->regmap, cfg, 1, 0);
++	if (!ret)
++		ret = regmap_read(afe->regmap, cfg + 4, &clear);
++	if (!ret)
++		ret = regmap_update_bits(afe->regmap, cfg + 4, BIT(31), ~clear & BIT(31));
++	if (!ret)
++		ret = regmap_update_bits(afe->regmap, AFE_IRQ_MCU_EN, bit, 0);
++	if (!ret)
++		ret = regmap_update_bits(afe->regmap, AFE_IRQ_MCU_DSP_EN, bit, 0);
++	if (ret)
++		buffer->irq_stop_error = ret;
++	else {
++		buffer->irq_stopped = true;
++		buffer->irq_prepared = false;
++	}
++unlock:
++	device_unlock(buffer->dev);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(mt8901_afe_sram_stop_irq);
++
++void mt8901_afe_sram_retire(struct mt8901_afe_sram_buffer *buffer)
++{
++	if (IS_ERR_OR_NULL(buffer) || buffer->ipc)
++		return;
++	device_lock(buffer->dev);
++	/* The retained lease must not outlive a borrowed ALSA substream pointer. */
++	if (buffer->published)
++		buffer->substream = NULL;
++	device_unlock(buffer->dev);
++}
++EXPORT_SYMBOL_GPL(mt8901_afe_sram_retire);
++
++int mt8901_afe_sram_publish(struct mt8901_afe_sram_buffer *buffer)
++{
++	struct mtk_base_afe *afe;
++
++	if (IS_ERR_OR_NULL(buffer))
++		return -EINVAL;
++	device_lock(buffer->dev);
++	if (buffer->dev->driver != &mt8901_afe_pcm_driver.driver || !buffer->substream) {
++		device_unlock(buffer->dev);
++		return -ENODEV;
++	}
++	afe = dev_get_drvdata(buffer->dev);
++	if (!mt8901_afe_sram_endpoint_valid(buffer, afe, false)) {
++		device_unlock(buffer->dev);
++		return -EBUSY;
++	}
++	/* Complete SRAM writes before the caller can submit a device address. */
++	wmb();
++	buffer->published = true;
++	device_unlock(buffer->dev);
++	return 0;
++}
++EXPORT_SYMBOL_GPL(mt8901_afe_sram_publish);
++
++int mt8901_afe_sram_release(struct mt8901_afe_sram_buffer *buffer)
++{
++	struct device *dev;
++	int ret;
++
++	if (IS_ERR_OR_NULL(buffer))
++		return -EINVAL;
++	dev = buffer->dev;
++	device_lock(dev);
++	if (buffer->published) {
++		device_unlock(dev);
++		return -EBUSY;
++	}
++	if (buffer->substream)
++		buffer->sram->memif[buffer->endpoint.memif] = NULL;
++	gen_pool_free(buffer->sram->pool, buffer->address, buffer->bytes);
++	atomic_dec(&buffer->sram->users);
++	ret = pm_runtime_put_sync(dev);
++	device_unlock(dev);
++	kfree(buffer);
++	put_device(dev);
++	module_put(THIS_MODULE);
++	return ret < 0 ? ret : 0;
++}
++EXPORT_SYMBOL_GPL(mt8901_afe_sram_release);

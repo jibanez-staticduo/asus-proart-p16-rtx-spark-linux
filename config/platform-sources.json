@@ -28,7 +28,9 @@
         "kernel/kernel_device_modules-6.12/drivers/remoteproc",
         "kernel/kernel_device_modules-6.12/drivers/mailbox",
         "kernel/kernel_device_modules-6.12/drivers/misc/mediatek/vcp",
-        "kernel/kernel_device_modules-6.12/drivers/misc/mediatek/adsp"
+        "kernel/kernel_device_modules-6.12/drivers/misc/mediatek/adsp",
+        "kernel/kernel_device_modules-6.12/drivers/misc/mediatek/audio_ipi",
+        "kernel/kernel_device_modules-6.12/sound/soc/mediatek/audio_dsp"
       ]
     },
     {
@@ -64,6 +66,34 @@
       "sha256": "8a2fea9c420435a135fa3a5e31345add625d857ea72c39c87d2758ad08dc765f",
       "provenance": "Microsoft public symbol server, 2026-11-04",
       "purpose": "Static analysis of the Nvidia OSROOT transport; never execute the Windows driver"
+    },
+    {
+      "name": "plutonhsprot.sys",
+      "url": "https://msdl.microsoft.com/download/symbols/plutonhsprot.sys/22F2EC0616000/plutonhsprot.sys",
+      "sha256": "b915203a7083f7b2f5d9fe08d0ff02f40d9f08b418ea1b8deb86acdcf244c1c2",
+      "provenance": "Microsoft public symbol server, 2026-11-06",
+      "purpose": "Static analysis of PCBI service framing and query clients; never execute Windows code"
+    },
+    {
+      "name": "plutonapi.dll",
+      "url": "https://msdl.microsoft.com/download/symbols/plutonapi.dll/40715DD1bf000/plutonapi.dll",
+      "sha256": "9ba962d073d097dbf558a21a33565d7780076e49ece0b4583f75ebe2d13a90fa",
+      "provenance": "Microsoft public symbol server, 2026-11-06",
+      "purpose": "Static analysis of PCBI service framing and query clients; never execute Windows code"
+    },
+    {
+      "name": "PlutonHspRot.pdb",
+      "url": "https://msdl.microsoft.com/download/symbols/PlutonHspRot.pdb/51E0D91DA14582881C33C8BC71576C541/PlutonHspRot.pdb",
+      "sha256": "cd0b95939fa5ce3c08a67bee429a7b029d6e5780f51a1dd0955c070376df0428",
+      "provenance": "Microsoft public symbol server, 2026-11-06",
+      "purpose": "Static analysis of PCBI service framing and query clients; never execute Windows code"
+    },
+    {
+      "name": "PlutonApi.pdb",
+      "url": "https://msdl.microsoft.com/download/symbols/PlutonApi.pdb/D64B2CA094B222074767E1D6204718C91/PlutonApi.pdb",
+      "sha256": "581f2b0314502b1c20213b16bfd95d3adabe2c4d37284a29a319f3639a7a789e",
+      "provenance": "Microsoft public symbol server, 2026-11-06",
+      "purpose": "Static analysis of PCBI service framing and query clients; never execute Windows code"
     }
   ]
 }

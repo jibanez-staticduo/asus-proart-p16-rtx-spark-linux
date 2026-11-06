@@ -45,10 +45,11 @@ The experimental SCP driver in `platform/scp` now reads the running firmware's
 log and sends bounded version/sensor-descriptor queries. It is gated to the
 H7607BA BIOS 300 resource layout and the observed SCP 2.0.8.0 dispatch ABI.
 It does not reset or replace platform-owned firmware. SCP queries, the ALS
-sensor, Pluton PFI channel discovery and secure boot of all three DSPs have
-passed live tests. DSP service IPC/shutdown and Pluton PCBI service execution
-remain work in progress;
-binding an ACPI device is not proof of their functionality.
+sensor, Pluton PCBI metadata queries and secure boot of all three DSPs have
+passed live tests. DSP transport, primary-buffer registration and task
+OPEN/HWFREE/CLOSE also passed hardware checks. DSP streaming/shutdown and
+Pluton control-service support remain unfinished; see the platform status
+for the qualification limits.
 
 Build the SCP package with `cd platform/scp && makepkg -f`, then install its
 `n1x-scp-dkms` package with
@@ -148,22 +149,18 @@ in the kernel recipe.
 | `MSFW1111` sensor hub / VEML3328 ALS | The existing SPI HID transport and Linux [HID sensor ALS](https://github.com/torvalds/linux/blob/v7.3/drivers/iio/light/hid-sensor-als.c) | Reuse the HID/IIO stack, with the local reset and report-request fixes; calibrated live values are still unverified. |
 | `NVDA8601` Pluton ROT1 | Microsoft PlutonNv binary and public symbols, plus the [Microsoft Azure Sphere source catalog](https://opensource.microsoft.com/3pc/)'s older Pluton mailbox/provider implementation as a design reference | No public Linux N1X binding was found. The inspected Azure Sphere 25.03 code sends pointers through its remote-API provider/security monitor, rather than implementing the observed N1X PFI packet interface. Linux `tpm_crb` Pluton support is a separate TPM start-method interface, not this ROT1 transport. |
 
-`platform/pluton` contains a native experimental ROT1 mailbox/PFI transport,
-its fixed ioctl definitions, a diagnostic CLI, and packet-format tests.
-It builds on the running P16 kernel and can be packaged with `makepkg -f`.
-The corrected 0.1.1 transport was tested on hardware on 2026-11-05:
-boot status was `0x40000`, and PFI channel discovery returned write-ready
-channels 1 and 2 with no new kernel errors. `n1x-pluton-dkms` 0.1.1-1 is now
-installed for all four installed kernel headers, and the installed driver
-repeated channel discovery successfully. The source defaults to transport disabled; the
-package-owned modprobe configuration enables it on explicit client requests.
-Querying its info ioctl only reads boot status.
-`enable_transport=1` explicitly permits mailbox initialization and transactions
-when the root diagnostic client requests `--discover`. No PCBI service IDs are
-guessed, no security firmware is loaded, and the working FF-A TPM and NPU
-SROOT device are not claimed. Execution of PCBI services remains pending.
-Channel discovery proves the tested mailbox
-and PFI path, not the cryptographic/attestation service integration.
+`platform/pluton` contains the native ROT1/PFI transport, a typed PCBI query
+ioctl, a root CLI and protocol/fault tests. Package `n1x-pluton-dkms 0.2.0-1`
+is installed for all five kernel headers. The typed queries were verified
+on hardware: protocol version 1, services 1/v1 and 2/v1, platform 6 and running
+package `PltnFull`. The kernel constructs the three supported query requests
+and validates complete replies. Generic raw exchange is disabled by default.
+The source defaults to transport disabled; package-owned modprobe configuration
+permits transactions when explicitly requested by a client. Probe sends no
+service query, and the info ioctl only reads status. No security firmware is
+loaded and no key or provisioning request is implemented. The working FF-A TPM
+and NPU SROOT are separate devices. The API and qualification are documented
+in [PCBI query service](platform/pluton/protocol.md) and the platform status.
 
 The original Microsoft Azure Sphere **25.03** kernel source archive and its
 selected Pluton sources are staged under `n1x-lab/platform/sources/vendor` and

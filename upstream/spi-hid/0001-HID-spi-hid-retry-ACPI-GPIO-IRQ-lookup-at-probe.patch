@@ -1,0 +1,27 @@
+Subject: [PATCH] HID: spi-hid: retry ACPI GPIO IRQ lookup at probe
+
+A GPIO IRQ may be unavailable during SPI enumeration. Resolve it again
+at probe and propagate deferred-probe errors before creating the HID
+device.
+
+---
+diff --git a/drivers/hid/spi-hid/spi-hid-acpi.c b/drivers/hid/spi-hid/spi-hid-acpi.c
+index 17bf943..c5abc5e 100644
+--- a/drivers/hid/spi-hid/spi-hid-acpi.c
++++ b/drivers/hid/spi-hid/spi-hid-acpi.c
+@@ -209,6 +209,15 @@ static int spi_hid_acpi_probe(struct spi_device *spi)
+ 		return -ENODEV;
+ 	}
+ 
++	/* Retry GPIO IRQ lookup at driver probe if enumeration had no IRQ. */
++	if (spi->irq <= 0) {
++		error = acpi_dev_gpio_irq_get(adev, 0);
++		if (error <= 0)
++			return dev_err_probe(dev, error ?: -EINVAL,
++					     "ACPI GPIO IRQ lookup failed\n");
++		spi->irq = error;
++	}
++
+ 	config = devm_kzalloc(dev, sizeof(struct spi_hid_acpi_config),
+ 			      GFP_KERNEL);
+ 	if (!config)

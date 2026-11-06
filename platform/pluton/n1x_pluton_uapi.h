@@ -36,8 +36,18 @@ struct n1x_pluton_exchange {
 	__u32 reserved;
 };
 
+struct n1x_pluton_query {
+	__u32 command;
+	__u32 rx_size;
+	__u32 rx_actual;
+	__u32 pcbi_result;
+	__aligned_u64 rx_ptr;
+	__u32 reserved[2];
+};
+
 #define N1X_PLUTON_INFO _IOR('P', 0, struct n1x_pluton_info)
 #define N1X_PLUTON_CHANNELS _IOR('P', 1, struct n1x_pluton_channels)
 #define N1X_PLUTON_EXCHANGE _IOWR('P', 2, struct n1x_pluton_exchange)
+#define N1X_PLUTON_QUERY _IOWR('P', 3, struct n1x_pluton_query)
 
 #endif

@@ -1,17 +1,18 @@
 pkgname=n1x-scp-dkms
 pkgver=0.2.0
-pkgrel=1
+pkgrel=3
 pkgdesc='ASUS P16 N1X SCP firmware queries and log reader (experimental)'
 arch=('aarch64')
 url='https://github.com/johannhartmann/asus-proart-p16-rtx-spark-linux'
 license=('GPL-2.0-only')
 depends=('dkms')
-source=('n1x_scp.c' 'Kbuild' 'dkms.conf' 'n1x-scp.conf' 'n1x-scp.modules')
-sha256sums=('09e66f8529be61f127c4e8c28c95e09317c89ed84afc3df3f217652d8ff44276'
+source=('n1x_scp.c' 'Kbuild' 'dkms.conf' 'n1x-scp.conf' 'n1x-scp.modules' 'README.md')
+sha256sums=('b6e3ad4703961adcde07a172682fc9a4a778cc5610128b774fed59c36e3c0946'
             'f29b39dad7e4c5795c6e075680149dad09e7bb4015c68c23d555eb73518af1d2'
             '027cf3cbec3b8d707a36e067935015e427ae8e292472a02cb18eed51d2293dea'
             '839e04fa00c81253a6d4093dcb2af4ad17ef85b21b884081fb6d236d8e878671'
-            '22a3ae59d7a55fed69b6a04ee7c8eca5aa9ffbcae225bf49f476b980ec388d43')
+            '22a3ae59d7a55fed69b6a04ee7c8eca5aa9ffbcae225bf49f476b980ec388d43'
+            '8feeb0097a7c4730626c448ff7f886ceee36082ffc91c80873d22d7cecd47426')
 
 package() {
   local file
@@ -20,4 +21,5 @@ package() {
   done
   install -Dm644 "$srcdir/n1x-scp.conf" "$pkgdir/usr/lib/modprobe.d/n1x-scp.conf"
   install -Dm644 "$srcdir/n1x-scp.modules" "$pkgdir/usr/lib/modules-load.d/n1x-scp.conf"
+  install -Dm644 "$srcdir/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
 }

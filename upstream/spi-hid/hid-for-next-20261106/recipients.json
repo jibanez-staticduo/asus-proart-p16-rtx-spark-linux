@@ -1,0 +1,38 @@
+{
+  "0001-HID-spi-hid-retry-ACPI-GPIO-IRQ-lookup-at-probe.patch": [
+    "Jiri Kosina <jikos@kernel.org> (maintainer:HID CORE LAYER)",
+    "Benjamin Tissoires <bentiss@kernel.org> (maintainer:HID CORE LAYER)",
+    "Jingyuan Liang <jingyliang@chromium.org> (blamed_fixes:1/1=100%)",
+    "Angela Czubak <acz@semihalf.com> (blamed_fixes:1/1=100%)",
+    "Dmitry Torokhov <dmitry.torokhov@gmail.com> (blamed_fixes:1/1=100%)",
+    "linux-input@vger.kernel.org (open list:HID CORE LAYER)",
+    "linux-kernel@vger.kernel.org (open list)"
+  ],
+  "0002-HID-spi-hid-evaluate-reset-on-the-ACPI-handle.patch": [
+    "Jiri Kosina <jikos@kernel.org> (maintainer:HID CORE LAYER)",
+    "Benjamin Tissoires <bentiss@kernel.org> (maintainer:HID CORE LAYER)",
+    "Dmitry Torokhov <dmitry.torokhov@gmail.com> (blamed_fixes:1/1=100%)",
+    "Jingyuan Liang <jingyliang@chromium.org> (blamed_fixes:1/1=100%)",
+    "Angela Czubak <acz@semihalf.com> (blamed_fixes:1/1=100%)",
+    "linux-input@vger.kernel.org (open list:HID CORE LAYER)",
+    "linux-kernel@vger.kernel.org (open list)"
+  ],
+  "0003-HID-spi-hid-serialize-and-type-GET-report-responses.patch": [
+    "Jiri Kosina <jikos@kernel.org> (maintainer:HID CORE LAYER)",
+    "Benjamin Tissoires <bentiss@kernel.org> (maintainer:HID CORE LAYER)",
+    "Angela Czubak <acz@semihalf.com> (blamed_fixes:1/1=100%)",
+    "Jingyuan Liang <jingyliang@chromium.org> (blamed_fixes:1/1=100%)",
+    "Dmitry Antipov <dmanti@microsoft.com> (blamed_fixes:1/1=100%)",
+    "linux-input@vger.kernel.org (open list:HID CORE LAYER)",
+    "linux-kernel@vger.kernel.org (open list)"
+  ],
+  "0004-HID-spi-hid-handle-P16-stream-only-input-reports.patch": [
+    "Jiri Kosina <jikos@kernel.org> (maintainer:HID CORE LAYER)",
+    "Benjamin Tissoires <bentiss@kernel.org> (maintainer:HID CORE LAYER)",
+    "Jingyuan Liang <jingyliang@chromium.org> (blamed_fixes:1/1=100%)",
+    "Dmitry Antipov <dmanti@microsoft.com> (blamed_fixes:1/1=100%)",
+    "Angela Czubak <acz@semihalf.com> (blamed_fixes:1/1=100%)",
+    "linux-input@vger.kernel.org (open list:HID CORE LAYER)",
+    "linux-kernel@vger.kernel.org (open list)"
+  ]
+}

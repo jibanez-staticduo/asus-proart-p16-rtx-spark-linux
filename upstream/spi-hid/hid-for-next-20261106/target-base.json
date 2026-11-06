@@ -1,0 +1,75 @@
+{
+  "maintainer_base": "720806515cb6921ab05caaa6f470f7054b56385e",
+  "prerequisite_head": "75cf8ad2bd218c25c0e949c5b5e270b7444266d8",
+  "review_head": "dac879fb60524fa8fdfd8d824e7260762ed27353",
+  "branch": "p16/spi-hid-review-20261106",
+  "fixes_tags": "Local imported prerequisite IDs; remap before submission",
+  "prerequisites": [
+    {
+      "source": "2111-HID-Add-BUS_SPI-support-and-define-HID_SPI_DEVICE-ma.patch",
+      "commit": "585ffc1a24bc0bb352a41cb62a2ef35c983734e3"
+    },
+    {
+      "source": "2112-HID-spi-hid-add-transport-driver-skeleton-for-HID-ov.patch",
+      "commit": "0e5d7e2fd9037676895bd87b8753c5ee76e00b1d"
+    },
+    {
+      "source": "2113-HID-spi-hid-add-spi-hid-driver-HID-layer.patch",
+      "commit": "0534d05f102e75f923ecd59b354b597e2f33b9d8"
+    },
+    {
+      "source": "2114-HID-spi-hid-add-HID-SPI-protocol-implementation.patch",
+      "commit": "e9ad53346f3e534e91dce0ff7ac08ce0701b4bdc"
+    },
+    {
+      "source": "2115-HID-spi_hid-add-spi_hid-traces.patch",
+      "commit": "18002f32f6fde14ab54a6df5df5774f1f453ffcf"
+    },
+    {
+      "source": "2116-HID-spi_hid-add-ACPI-support-for-SPI-over-HID.patch",
+      "commit": "a79528100bcaf8b1f814746e1221e07e66e6b347"
+    },
+    {
+      "source": "2117-HID-spi_hid-add-device-tree-support-for-SPI-over-HID.patch",
+      "commit": "4323dffac83cefc39b0c03d8d9efb3d5c983483a"
+    },
+    {
+      "source": "2118-dt-bindings-input-Document-hid-over-spi-DT-schema.patch",
+      "commit": "7a031de058ba6ebeba7d480a84ad5cb9e631ade8"
+    },
+    {
+      "source": "2119-HID-spi-hid-add-power-management-implementation.patch",
+      "commit": "5e8acea25236001970bfda78fb2b803979aa7985"
+    },
+    {
+      "source": "2120-HID-spi-hid-add-panel-follower-support.patch",
+      "commit": "adb5283bcfa75d648c738633b7e3aafec945f339"
+    }
+  ],
+  "additional_imports": [
+    {
+      "commit": "ad474665bcbe5a1015be5edf831d4ab4e3432bef",
+      "scope": [
+        "drivers/spi/spi.c",
+        "include/linux/spi/spi.h"
+      ]
+    },
+    {
+      "commit": "75cf8ad2bd218c25c0e949c5b5e270b7444266d8",
+      "scope": [
+        "drivers/hid/spi-hid/*",
+        "Documentation/devicetree/bindings/input/hid-over-spi.yaml"
+      ]
+    }
+  ],
+  "patch_sha256": {
+    "0000-cover-letter.patch": "74bf72eb1bb629ddb6a833509b292aa6fd01d76be0504f84ee1889e8f8222748",
+    "0001-HID-spi-hid-retry-ACPI-GPIO-IRQ-lookup-at-probe.patch": "b338defdb3f14356eff1183282d94ec672df26bf21446859d0a57b56ebcd31d8",
+    "0002-HID-spi-hid-evaluate-reset-on-the-ACPI-handle.patch": "d01189700a12826921d90feca692eae6a0e626533bfc52880919a757308e84d2",
+    "0003-HID-spi-hid-serialize-and-type-GET-report-responses.patch": "a3c6e9919bb118165466446071a67c5e01c5b150cc0bf333a99fbbeeaf51ad22",
+    "0004-HID-spi-hid-handle-P16-stream-only-input-reports.patch": "53fa7c6d3347e77097083d7660cb79e02069767a8d9e572309d31144302e2480"
+  },
+  "hardware_target_kernel_booted": false,
+  "submitted": false,
+  "human_dco_signoff": false
+}

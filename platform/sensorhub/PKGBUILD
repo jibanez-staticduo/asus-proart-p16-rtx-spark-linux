@@ -1,13 +1,13 @@
 pkgname=n1x-sensorhub-dkms
 pkgver=0.1.0
-pkgrel=1
+pkgrel=2
 pkgdesc='P16 SCP sensor-hub ACPI reset and SPI HID report handling fixes'
 arch=('aarch64')
 url='https://github.com/johannhartmann/asus-proart-p16-rtx-spark-linux'
 license=('GPL-2.0-only')
 depends=('dkms')
 source=('spi-hid-acpi.c' 'spi-hid-core.c' 'spi-hid.h' 'spi-hid-core.h' 'spi-hid-trace.h' 'Kbuild' 'dkms.conf' 'provenance.json')
-sha256sums=('a49290ecdfb6658d53fc574f3382aeefb6a485978879d8b2f6d7feb66848d312'
+sha256sums=('6a0e9c671885d79751581d4ceb9b4ad2b1c60941a74ded1598d6350e7f6e479f'
             'aa0af714a7afb10270409daad97b6709de7d9a86d3700db61f6015db96a6d303'
             '2af9a1c759b9e782fde41718ce707f6963a27a72141e2a1d70dce6b76c850854'
             'f46c83c9f1a71dec3c207dda1c4f8ebb71daf08b7e0daa8cc786e9bee5bfa9a4'

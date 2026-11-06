@@ -1,38 +1,43 @@
 pkgname=n1x-pluton-dkms
-pkgver=0.1.1
+pkgver=0.2.0
 pkgrel=1
-pkgdesc='Experimental P16 N1X ROT1 mailbox and PFI transport'
+pkgdesc='P16 N1X ROT1/PFI transport and PCBI firmware queries'
 arch=('aarch64')
 url='https://github.com/johannhartmann/asus-proart-p16-rtx-spark-linux'
 license=('GPL-2.0-only')
 depends=('dkms' 'python')
 makedepends=('gcc')
-source=('n1x_pluton.c' 'n1x_pluton_protocol.h' 'n1x_pluton_uapi.h' 'Kbuild' 'dkms.conf' 'pluton-info.py' 'provenance.json' 'protocol_test.c' 'n1x-pluton.conf' 'n1x-pluton.modules')
-sha256sums=('760225b74a6974c5e194edfcb6caf8844a0adbe68cdf532333de2514c3dfbcd2'
-            'd42a773bc1502cdd6d3f1e87a879f8031611a64dd3064ee0d41976027670ee20'
-            '4abe0db883ec5390b12f4961d7f0e321c8281617c11b46f1e07a97ab9055fe67'
+source=('n1x_pluton.c' 'n1x_pluton_protocol.h' 'n1x_pluton_uapi.h' 'Kbuild' 'dkms.conf' 'pluton-info.py' 'provenance.json' 'protocol_test.c' 'n1x-pluton.conf' 'n1x-pluton.modules' 'protocol.md' 'n1x_pcbi_protocol.h' 'test_query.py')
+sha256sums=('b3cccdaf2777dfb7cc0c720302b541033c1034b4c003feedea7a64c89952e2ab'
+            '7409eef71d8d4a9d8df65773af3a0754257d4d2635bb09f437cdd7e452fdebb6'
+            'fe33b23a549c596200a4f7aad7e83b4787a951957fe81729451b8fb49116918c'
             'fa4d3fb4830c446fcd4506f0973bc37d100f4d9b3e0f5092661216f5035fb5a3'
-            'ca425656f7117abcfe7c6c0f009383ff70f7003a7430932089eae043d7c99443'
-            '45c62559287940230a7a6bcf9f2f57f48c58d824f614e09e0310726b500ed180'
-            '15a6ef736714a92aa55ec110ec10aaa716e44fe090d0bbf58999346eb68a57a2'
-            '09e9d97d27481ccb58332b85aa9fc8865a5dc67bfc41bf5b4dbf59cc3a1bb9e4'
+            '035262b72fdce1ffac8554acbe6a92774dac974365cf9475763440e49d22d3b6'
+            '7da2716a237aa3bde057b21b99401c0b6bd205924c3364dd4f73fb33a8967fd6'
+            '21ecb88babf7e974fb3b813361651ceb028b78dc3445ec2bde8e614ae0eae7bc'
+            '2a6865978655a1ea61f85108306c7ced9459ea7ea77be0384dac1e4b5793ea96'
             '110b492c6e5d7c84d631d11dd5d214fe8c8cf0493bb0c03ec4293b30f6def19d'
-            'f591ac50c5d162ec0a9d6bd4d7adadb50d55f815999d875ec30ad234a9d175ad')
+            'f591ac50c5d162ec0a9d6bd4d7adadb50d55f815999d875ec30ad234a9d175ad'
+            '70c6b5b194d6292e6270794034b8156cef6c6b98b7d0bb701791bd34f584791d'
+            '76e1f99a3bc870dfaf0701cee6b6ed2799b99477e0ca5e379ff4abb2a08021ab'
+            '2be2bfe39eba1c8595aba6e5e7e822dfa64360e9eac28d8b0111783382b1160b')
 
 check() {
   cd "$srcdir"
   cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
     -o protocol-test protocol_test.c
   ./protocol-test
+  python test_query.py
 }
 
 package() {
   local file
-  for file in n1x_pluton.c n1x_pluton_protocol.h n1x_pluton_uapi.h Kbuild dkms.conf; do
+  for file in n1x_pluton.c n1x_pluton_protocol.h n1x_pluton_uapi.h n1x_pcbi_protocol.h Kbuild dkms.conf; do
     install -Dm644 "$srcdir/$file" "$pkgdir/usr/src/n1x-pluton-$pkgver/$file"
   done
   install -Dm644 "$srcdir/n1x-pluton.conf" "$pkgdir/usr/lib/modprobe.d/n1x-pluton.conf"
   install -Dm644 "$srcdir/n1x-pluton.modules" "$pkgdir/usr/lib/modules-load.d/n1x-pluton.conf"
   install -Dm755 "$srcdir/pluton-info.py" "$pkgdir/usr/bin/n1x-pluton-info"
+  install -Dm644 "$srcdir/protocol.md" "$pkgdir/usr/share/doc/$pkgname/protocol.md"
   install -Dm644 "$srcdir/provenance.json" "$pkgdir/usr/share/doc/$pkgname/provenance.json"
 }

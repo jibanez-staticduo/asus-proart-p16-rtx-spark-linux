@@ -1,5 +1,5 @@
 pkgname=n1x-adsp-dkms
-pkgver=0.1.1
+pkgver=0.1.13
 pkgrel=1
 pkgdesc='Experimental P16 MT8901 DSP secure-boot driver; firmware boot disabled'
 arch=('aarch64')
@@ -10,26 +10,57 @@ optdepends=('n1x-sroot-provider-dkms: serialized SROOT upload API'
             'n1x-adsp-firmware-local: original signed images for explicit DSP boot')
 checkdepends=('python' 'gcc')
 source=('n1x_adsp.c' 'n1x_sroot_client.h' 'Kbuild' 'dkms.conf'
-        'n1x-adsp.conf' 'provenance.json' 'README.md' 'test_driver.py')
-sha256sums=('0701b7aa4ee4322c00bea62d2bc51c514f55afef9c897b8e93fb9554de96af03'
+        'n1x-adsp.conf' 'provenance.json' 'README.md' 'test_driver.py'
+        'n1x_adsp_ipc.h' 'n1x_adsp_client.h' 'test_transport.py' 'ipc_test.c' 'protocol.md'
+        'test_primary.py' 'test_lifecycle.py' 'n1x_adsp_pcm.h' 'pcm_test.c'
+        'mt8901-afe-sram.h' 'test_pcm_service.py' 'test_period.py' 'test_producer.py' 'test_trigger.py')
+sha256sums=('59ac02728e161bcc4029052fc6fd15adb3abd1131a6f22727e7189f08d92032d'
             '97a563951b1d981b3a14f525f7bad0eaf33fe485a1f9352beb30af95148960f9'
             '230086b8afc95aea40727de3a89c05228cd79b78854e8973eefb06b65d740c02'
-            'b192d6d3d25128169e67b1a370cb2903776d0e6ac3df6f7c377bbdd8229f40ed'
+            'f295be39f25536a520d2b771ca8551ca98e12591cb5eda7740db8309dd40f334'
             '8beebbc715402c0bbea8120cbc29f2c601ade0c89589403d8aef6cc88cb56e36'
-            'a890ddd40d7a85561753443cae7c737dc1bcfc2c3614388d05a807c4fbf82441'
-            'eacec6d41a90050a5bf63184dbcdb49de06e8eacef86fa1ea85b3a9dfe1ce3c3'
-            'f6676ac8fd7d2a4cf387920719f8afb83296cc2a45a67c6ad70a58ac507eb2b7')
+            'b6f4c4cf0ce0ac29ad4d964ece5805cc43caa44b93f18458c0864f85962a1838'
+            'e342969f1f7de4b2be005514ac6828929ca1cdb34201466095d7efae8cc69f50'
+            'a003f32195720bbce44dc65ffa0f1f151c5cfacbf5cdf55b7b4dceb6632f3ff8'
+            '065f50cda1705bba540aed2ca8888d6c9c2e67052484139454396c85bbb12b67'
+            '8730bf8c955826279f848a0577984534fcb2edc20b4afeaffdfa9fc599a67a9a'
+            'e9aa0dcc0da19dd325a05c645cc3e7cbf4889bfdbd585ab3e84f5ec60afb7eed'
+            '4179280ce67720d36b3eb23b86159a3bac59a26e855c717f5cf7ec6081478b7a'
+            '45c04027cd5f9b3c73e3ae60e2307ba47dca8efc155d77c17b34e92b2cc39729'
+            '3cd8df0ee7fc187701e95b7bc64cfbf0dcbb90ac91ecb0272875c863942ff97b'
+            'bf9f936e7c9fbbb3467be4f241227e815f84e7d272c60507578230814aa9fdd6'
+            '7f696a92fbe1cd1d45922b158a9ffd32ae89cde5c4c6578abd68a4f431ee541c'
+            '433f6618cedfb6abbf7c3993d6ac36d44863848548ab5026528162f5935784c8'
+            '27ba54e6fee8a0271ac7ea7331bb5513385c169dc2680ad48f0018a2ee92a7aa'
+            'c49ff9daca1fb12ee62a160974609b4545730a66e11020bd531af7a5fbe12745'
+            'b1660652305eb73686e0c0f3bc931f1a64f0c9f5ed61caf444c9c91d1c9c9b3d'
+            '1e9c5fc77c67ab8ff60e66fc9531e0badc441d7b5bbe914a2ffaa1a0e61f8d93'
+            '464d6c95f70d494136a0a660409fd87aab5a808f2fba3af43d15d28985cdec92')
 
 check() {
   cd "$srcdir"
   python test_driver.py
+  python test_transport.py
+  python test_primary.py
+  python test_lifecycle.py
+  python test_pcm_service.py
+  python test_period.py
+  python test_producer.py
+  python test_trigger.py
+  cc -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+    ipc_test.c -o ipc-test
+  ./ipc-test
+  cc -std=gnu11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+    pcm_test.c -o pcm-test
+  ./pcm-test
 }
 
 package() {
   local file
-  for file in n1x_adsp.c n1x_sroot_client.h Kbuild dkms.conf provenance.json; do
+  for file in n1x_adsp.c n1x_sroot_client.h n1x_adsp_ipc.h n1x_adsp_client.h n1x_adsp_pcm.h mt8901-afe-sram.h Kbuild dkms.conf provenance.json; do
     install -Dm644 "$srcdir/$file" "$pkgdir/usr/src/n1x-adsp-$pkgver/$file"
   done
   install -Dm644 "$srcdir/n1x-adsp.conf" "$pkgdir/usr/lib/modprobe.d/n1x-adsp.conf"
   install -Dm644 "$srcdir/README.md" "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 "$srcdir/protocol.md" "$pkgdir/usr/share/doc/$pkgname/protocol.md"
 }

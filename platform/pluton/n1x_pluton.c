@@ -1,10 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* N1X ROT1 mailbox/PFI transport. PCBI service integration is work in progress.
- * Protocol evidence: Microsoft PlutonNv.sys 10.0.28000.3365, SHA256
- * c3e67ea741188fb77d814d2d94ecfe2c136dae8e393ae58f7725e502053910ac.
- * The working FF-A TPM and NVDA8600/SROOT are separate devices; neither is
- * claimed, reset, nor mapped here. No reserved security DRAM is exposed.
- */
+/* N1X ROT1 mailbox/PFI transport for PCBI requests. */
 #include <linux/acpi.h>
 #include <linux/capability.h>
 #include <linux/compat.h>
@@ -26,6 +21,7 @@
 #include <linux/vmalloc.h>
 
 #include "n1x_pluton_protocol.h"
+#include "n1x_pcbi_protocol.h"
 #include "n1x_pluton_uapi.h"
 
 #define N1X_ROT_IN_DATA 0x10
@@ -47,6 +43,10 @@ static bool enable_transport;
 module_param(enable_transport, bool, 0400);
 MODULE_PARM_DESC(enable_transport, "Enable PFI mailbox transactions; disabled until explicitly requested");
 
+static bool enable_raw_exchange;
+module_param(enable_raw_exchange, bool, 0400);
+MODULE_PARM_DESC(enable_raw_exchange, "Permit CAP_SYS_RAWIO raw exchanges; disabled by default");
+
 struct n1x_pluton {
 	struct kref reference;
 	struct mutex lock;
@@ -59,9 +59,8 @@ struct n1x_pluton {
 	bool suspended;
 };
 
-/* Resource 1 aliases register zero as stride metadata. Claim only the
- * actual mailbox registers at base+0x10..0xd3, as the working SROOT driver
- * does for its distinct device. Never request the metadata alias or DRAM.
+/* Resource 1 aliases register zero as stride metadata. The mailbox register
+ * window starts at base+0x10 and ends at base+0xd3, excluding that alias.
  */
 static void __iomem *n1x_rot_reg(struct n1x_pluton *p, unsigned int offset)
 {
@@ -104,9 +103,7 @@ static int n1x_rot_init(struct n1x_pluton *p, unsigned long deadline)
 		return -ENOTRECOVERABLE;
 	if (p->initialized)
 		return 0;
-	/* InitHwRot at VA 1400036e8: initialize only this host mailbox and
-	 * acknowledge its stale FIFOs. This does not reset the security CPU.
-	 */
+	/* Initialize the host mailbox and acknowledge its stale FIFOs. */
 	iowrite32(~0U, n1x_rot_reg(p, N1X_ROT_ERROR_CLEAR0));
 	iowrite32(~0U, n1x_rot_reg(p, N1X_ROT_ERROR_CLEAR1));
 	iowrite32(3, n1x_rot_reg(p, N1X_ROT_IN_CONTROL));
@@ -136,8 +133,8 @@ static int n1x_rot_message(struct n1x_pluton *p, const u8 *message, size_t lengt
 	ret = n1x_rot_wait(p, N1X_ROT_READY, deadline);
 	if (ret)
 		goto poison;
-	/* PfiPlatSendOld at VA 140003038 uses command 0x3f, zero routing
-	 * fields, and a word-count header. The max PFI packet is 52 bytes.
+	/* PFI v0 uses command 0x3f, zero routing fields and a word-count
+	 * header. A PFI packet contains at most 52 bytes.
 	 */
 	header = 0x3f | (DIV_ROUND_UP(length, 4) << 8);
 	iowrite32(header, n1x_rot_reg(p, N1X_ROT_IN_DATA));
@@ -147,6 +144,7 @@ static int n1x_rot_message(struct n1x_pluton *p, const u8 *message, size_t lengt
 		memcpy(word, message + offset, min_t(size_t, 4, length - offset));
 		iowrite32(get_unaligned_le32(word), n1x_rot_reg(p, N1X_ROT_IN_DATA));
 	}
+	/* Complete the FIFO writes before handing the request to firmware. */
 	wmb();
 	iowrite32(1, n1x_rot_reg(p, N1X_ROT_IN_CONTROL));
 	ret = n1x_rot_wait(p, N1X_ROT_SAFETY_STATUS, deadline);
@@ -175,7 +173,7 @@ static int n1x_rot_message(struct n1x_pluton *p, const u8 *message, size_t lengt
 	ret = n1x_rot_wait(p, N1X_ROT_OUT_STATUS, deadline);
 	if (ret)
 		goto poison;
-	/* NvMailboxGetResponse at VA 140003bd0 reads one 16-byte FIFO packet. */
+	/* Each response occupies one 16-byte FIFO packet. */
 	for (offset = 0; offset < N1X_PFI_RX_PACKET; offset += 4) {
 		value = ioread32(n1x_rot_reg(p, N1X_ROT_OUT_DATA));
 		put_unaligned_le32(value, reply + offset);
@@ -325,6 +323,65 @@ static int n1x_pluton_rpc(struct n1x_pluton *p, struct n1x_pluton_exchange *exch
 	}
 }
 
+static long n1x_pluton_query_ioctl(struct n1x_pluton *p, void __user *user)
+{
+	struct n1x_pluton_query query;
+	struct n1x_pluton_exchange exchange = {
+		.channel = N1X_PCBI_QUERY_SERVICE,
+		.tx_size = 12,
+	};
+	u8 tx[12], *rx;
+	size_t capacity;
+	unsigned long deadline;
+	int ret;
+
+	if (copy_from_user(&query, user, sizeof(query)))
+		return -EFAULT;
+	capacity = n1x_pcbi_query_capacity(query.command);
+	if (!capacity || query.rx_size < 16 || query.rx_size > capacity ||
+	    query.rx_actual || query.pcbi_result || query.reserved[0] || query.reserved[1])
+		return -EINVAL;
+	if (!query.rx_ptr || !access_ok(u64_to_user_ptr(query.rx_ptr), query.rx_size))
+		return -EFAULT;
+	rx = kvzalloc(capacity, GFP_KERNEL);
+	if (!rx)
+		return -ENOMEM;
+	n1x_pcbi_query_request(tx, query.command);
+	exchange.rx_size = capacity;
+	ret = mutex_lock_interruptible(&p->lock);
+	if (ret)
+		goto free;
+	deadline = jiffies + msecs_to_jiffies(10000);
+	ret = n1x_rot_init(p, deadline);
+	if (ret)
+		goto unlock;
+	ret = n1x_pluton_rpc(p, &exchange, tx, rx, deadline);
+	if (ret)
+		goto unlock;
+	query.rx_actual = exchange.rx_actual;
+	ret = n1x_pcbi_validate_reply(rx, exchange.rx_actual, query.command);
+	if (ret == -EPROTO) {
+		p->poisoned = true;
+		goto unlock;
+	}
+	if (ret && ret != -EREMOTEIO)
+		goto unlock;
+	query.pcbi_result = n1x_pcbi_le32(rx + 12);
+	if (!ret) {
+		if (query.rx_actual > query.rx_size)
+			ret = -EMSGSIZE;
+		else if (copy_to_user(u64_to_user_ptr(query.rx_ptr), rx, query.rx_actual))
+			ret = -EFAULT;
+	}
+unlock:
+	mutex_unlock(&p->lock);
+	if (copy_to_user(user, &query, sizeof(query)))
+		ret = -EFAULT;
+free:
+	kvfree(rx);
+	return ret;
+}
+
 static long n1x_pluton_ioctl(struct file *file, unsigned int command, unsigned long arg)
 {
 	struct n1x_pluton *p = file->private_data;
@@ -336,11 +393,15 @@ static long n1x_pluton_ioctl(struct file *file, unsigned int command, unsigned l
 	unsigned long deadline;
 	int ret;
 
+	if (command == N1X_PLUTON_QUERY)
+		return n1x_pluton_query_ioctl(p, user);
 	if (command != N1X_PLUTON_INFO && command != N1X_PLUTON_CHANNELS &&
 	    command != N1X_PLUTON_EXCHANGE)
 		return -ENOTTY;
 	if (command != N1X_PLUTON_INFO && !capable(CAP_SYS_RAWIO))
 		return -EPERM;
+	if (command == N1X_PLUTON_EXCHANGE && !enable_raw_exchange)
+		return -EOPNOTSUPP;
 	if (command == N1X_PLUTON_EXCHANGE) {
 		if (copy_from_user(&exchange, user, sizeof(exchange)))
 			return -EFAULT;
@@ -454,7 +515,7 @@ static int n1x_pluton_probe(struct platform_device *pdev)
 	if (!regs || !stride || regs->start != 0x18020000 || resource_size(regs) != 0x1000 ||
 	    stride->start != regs->start || resource_size(stride) != 0x10)
 		return dev_err_probe(dev, -ENODEV, "unrecognized ROT1 mailbox resources\n");
-	p = kzalloc(sizeof(*p), GFP_KERNEL);
+	p = kzalloc_obj(*p);
 	if (!p)
 		return -ENOMEM;
 	kref_init(&p->reference);
@@ -535,6 +596,6 @@ static struct platform_driver n1x_pluton_driver = {
 	},
 };
 module_platform_driver(n1x_pluton_driver);
-MODULE_DESCRIPTION("Experimental N1X ROT1 mailbox/PFI transport; hardware validation pending");
+MODULE_DESCRIPTION("N1X ROT1 PCBI query service and PFI transport");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.1.1");
+MODULE_VERSION("0.2.0");

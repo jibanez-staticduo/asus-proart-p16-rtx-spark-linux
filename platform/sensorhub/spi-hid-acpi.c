@@ -187,12 +187,9 @@ static int spi_hid_acpi_deassert_reset(struct spihid_ops *ops)
 
 	acpi_status status;
 
-	/* An acpi_device's struct device is not its physical SPI companion.
-	 * device_reset(&adev->dev) therefore has no ACPI_HANDLE and never runs
-	 * the already-validated _RST method. Use the namespace handle directly.
-	 */
+	/* The namespace device has no physical-device ACPI companion. */
 	status = acpi_evaluate_object(acpi_device_handle(conf->adev), "_RST", NULL, NULL);
-	dev_info(&conf->adev->dev, "sensorhub _RST: %s\n", acpi_format_exception(status));
+	dev_dbg(&conf->adev->dev, "_RST: %s\n", acpi_format_exception(status));
 	return ACPI_FAILURE(status) ? -EIO : 0;
 }
 

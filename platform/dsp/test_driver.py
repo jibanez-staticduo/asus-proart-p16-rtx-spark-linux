@@ -67,6 +67,7 @@ def main():
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include "n1x_adsp_client.h"
 #include "n1x_sroot_client.h"
 typedef uint8_t u8;typedef uint16_t u16;typedef uint32_t u32;typedef uint64_t u64,dma_addr_t;
 typedef int irqreturn_t;
@@ -87,6 +88,8 @@ typedef int irqreturn_t;
 #define __ffs(n) __builtin_ctz(n)
 #define READ_ONCE(x) (x)
 #define WRITE_ONCE(x,v) ((x)=(v))
+#define spin_lock_irqsave(lock,flags) ((void)(lock),(flags)=0)
+#define spin_unlock_irqrestore(lock,flags) ((void)(lock),(void)(flags))
 #define lower_32_bits(n) ((u32)(n))
 #define msecs_to_jiffies(n) (n)
 #define dev_info(...) ((void)0)
@@ -189,7 +192,8 @@ static void put_provider(void) {assert(symbol_refs==1);symbol_refs--;}
 #define symbol_put(name) put_provider()
 ''' + state + r'''
 static struct n1x_adsp dsp;
-''' + handlers + r'''
+''' + source[source.index('static void n1x_adsp_ipc_fail('):
+             source.index('static bool n1x_adsp_tx_idle(')] + handlers + r'''
 static int upload_stub(u32 id,const u8 *image,size_t bytes,struct n1x_sroot_client_result *result) {
  assert(id==0xc0304 && image==firmware.data && bytes==firmware.size);
  assert(module_refs==1 && pm_refs==1 && symbol_refs==1 && dsp.published && dsp.attempted && writes==2);
@@ -220,6 +224,14 @@ static void power_notification(unsigned type,u32 value)
  mailbox_memory[ADSP_OUT_STATUS/4]=8;
  in_irq=1;assert(n1x_adsp_irq(0,&dsp)==IRQ_HANDLED);in_irq=0;
 }
+static unsigned period_calls;
+static int period_error;
+static void period_callback(void *data,const struct n1x_adsp_pcm_position *position,int error)
+{
+ assert(in_irq && data==&dsp && shared_memory[4]==0);
+ assert(position->byte_offset==1920 && position->counter==5 && position->notifications==1);
+ period_calls++;period_error=error;
+}
 int main(void) {
  for(int f=1;f<=12;f++) {
   reset();fault=f;
@@ -249,19 +261,48 @@ int main(void) {
  /* Wrong notification class must never submit an SSPM request. */
  reset();assert(!n1x_adsp_boot(&dsp));power_notification(0,7);
  assert(!dsp.power_queued && !dsp.power_work.pending && !power_calls);
+ /* The IRQ routes a transaction ACK separately from firmware notifications. */
+ reset();assert(!n1x_adsp_boot(&dsp));dsp.ipc_pending=true;dsp.ipc_token=0x3456;
+ u8 *ack=(u8 *)shared_memory+ADSP_RX_OFFSET;memset(ack,0,ADSP_RX_BYTES);
+ ack[16]=0x56;ack[17]=0x34;ack[21]=2;
+ mailbox_memory[ADSP_OUT_STATUS/4]=1;
+ assert(n1x_adsp_irq(0,&dsp)==IRQ_HANDLED && !dsp.ipc_pending && dsp.ipc_done.done);
+ assert(!memcmp(dsp.ipc_reply.packet,ack,ADSP_RX_BYTES) && !dsp.ipc_poisoned);
+ assert(!dsp.power_queued && dsp.ready.done);
+ /* Playback notifications follow the actual IRQ slot-release path. */
+ reset();assert(!n1x_adsp_boot(&dsp));
+ dsp.primary_host_pcm=(struct n1x_adsp_pcm_config){.address=0xe0001000,.bytes=7680,.channels=2,.sample_bits=16};
+ dsp.primary_period_enabled=true;dsp.primary_period=period_callback;dsp.primary_period_data=&dsp;
+ u8 *event=(u8 *)shared_memory+ADSP_RX_OFFSET;memset(event,0,ADSP_RX_BYTES);
+ event[18]=7;event[20]=1;event[22]=0x1b;n1x_adsp_ipc_put32(event+24,96);
+ n1x_adsp_pcm_put64(event+0x30,0xe0001780);n1x_adsp_ipc_put32(event+0x74,5);
+ mailbox_memory[ADSP_OUT_STATUS/4]=1;in_irq=1;
+ assert(n1x_adsp_irq(0,&dsp)==IRQ_HANDLED && period_calls==1 && !period_error);in_irq=0;
+ assert(!dsp.ipc_poisoned && dsp.primary_position.byte_offset==1920);
+ event[21]=2;event[16]=1;dsp.ipc_pending=true;dsp.ipc_token=1;
+ mailbox_memory[ADSP_OUT_STATUS/4]=1;in_irq=1;
+ assert(n1x_adsp_irq(0,&dsp)==IRQ_HANDLED && period_calls==1 && dsp.ipc_done.done);in_irq=0;
+ event[21]=0;n1x_adsp_pcm_put64(event+0x30,0xe0001001);
+ mailbox_memory[ADSP_OUT_STATUS/4]=1;in_irq=1;
+ assert(n1x_adsp_irq(0,&dsp)==IRQ_HANDLED && period_calls==2 && period_error==-ERANGE);in_irq=0;
+ assert(dsp.primary_period_error==-ERANGE && !dsp.ipc_poisoned);
  /* Preserve order; only the worker performs the sleeping operation. */
  reset();assert(!n1x_adsp_boot(&dsp));power_notification(2,1);power_notification(2,2);
  assert(!power_calls);n1x_adsp_power_work(&dsp.power_work);
  assert(power_calls==2 && power_values[0]==1 && power_values[1]==2 && dsp.power_completed==2);
  /* A failed SSPM operation is terminal; later notifications cannot retry it. */
  reset();assert(!n1x_adsp_boot(&dsp));power_notification(2,3);power_notification(2,4);
+ dsp.ipc_pending=true;dsp.ipc_token=1;
  power_reply=-EIO;n1x_adsp_power_work(&dsp.power_work);
  assert(power_calls==1 && power_value==3 && dsp.power_error==-EIO && !dsp.power_completed);
+ assert(dsp.ipc_done.done && !dsp.ipc_pending && dsp.ipc_poisoned && dsp.ipc_error==-EIO);
  power_notification(2,5);n1x_adsp_power_work(&dsp.power_work);
  assert(power_calls==1 && dsp.power_queued==2 && dsp.power_error==-EIO);
  /* Overflow never overwrites a queued request or starts more power operations. */
- reset();assert(!n1x_adsp_boot(&dsp));for(unsigned i=0;i<17;i++)power_notification(2,i);
+ reset();assert(!n1x_adsp_boot(&dsp));dsp.ipc_pending=true;
+ for(unsigned i=0;i<17;i++)power_notification(2,i);
  assert(dsp.power_queued==16 && dsp.power_requests.count==16 && dsp.power_error==-ENOSPC);
+ assert(!dsp.ipc_pending && dsp.ipc_done.done && dsp.ipc_error==-ENOSPC && dsp.ipc_poisoned);
  n1x_adsp_power_work(&dsp.power_work);assert(!power_calls);
  reset();puts("DSP boot/IRQ, power requests, bounded queues and DMA lifetime tests passed");
 }

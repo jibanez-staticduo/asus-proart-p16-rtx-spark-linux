@@ -57,11 +57,468 @@
     "linux_api": "mtk_send_power_control_req",
     "linux_header": "include/linux/soc/mediatek/mtk-pwrap.h",
     "mapping": "power_cntl_scmi_data: requestId=0; customdata={1, firmware_value, 0}",
-    "evidence": "OEM input layout and Linux API layout match; equivalence on DSP firmware remains to be validated",
+    "evidence": "One firmware notification dispatched through mtk_send_power_control_req and completed by SSPM; dsp-primary-task-live.json (DSP 0.1.3)",
     "queue_entries": 16,
     "execution_context": "workqueue; no sleeping SSPM request in the interrupt handler",
     "error_policy": "record first error and stop further power submissions; no automatic retry",
-    "hardware_validated": false,
+    "hardware_validated": true,
     "tests": "test_driver.py: actual C worker/IRQ and remove callbacks with fault-injected OS/API edges"
+  },
+  "kernel_transport": {
+    "version": "0.1.2",
+    "api": "n1x_adsp_transfer",
+    "header": "n1x_adsp_client.h",
+    "tx_slot_offset": "0x140",
+    "tx_busy_offset": "0x14",
+    "inbound_set_offset": "0x100",
+    "packet_bytes": 288,
+    "wait_limit_us_per_stage": 5000000,
+    "automatic_service_requests": false,
+    "hardware_validated": true,
+    "error_policy": "terminal on unexpected ACK, timeout, slot-release failure or firmware power error; retain published DMA/PM/module references",
+    "tests": [
+      "test_transport.py",
+      "test_driver.py",
+      "ipc_test.c"
+    ],
+    "hardware_evidence": "n1x-lab/results/platform-enablement-20261106/dsp-primary-registration-live.json and dsp-primary-task-live.json (DSP 0.1.3)"
+  },
+  "linux_audio_reference": {
+    "manifest": "../../config/platform-sources.json",
+    "repository": "https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_mt6993.git",
+    "commit": "2cc7f4606b65a9ede42030ee82614dd845b665a1",
+    "files": {
+      "kernel/kernel_device_modules-6.12/drivers/misc/mediatek/audio_ipi/include/audio_playback_msg_id.h": "ec1102f2ce89d3711b5eb72df96e5342c4b248682346329b9425b3140d1c63bd",
+      "kernel/kernel_device_modules-6.12/drivers/misc/mediatek/audio_ipi/include/audio_messenger_ipi.h": "853483129c9135b61673d0cbe8f994433f5b6167df2198cd0991553828a4a0a6",
+      "kernel/kernel_device_modules-6.12/sound/soc/mediatek/audio_dsp/audio_buf.h": "aed94343019e1f0c2d83fdef591c27c3947766e7d0c4ede976424f9ad8b96ca6",
+      "kernel/kernel_device_modules-6.12/sound/soc/mediatek/audio_dsp/mtk-dsp-mem-control.c": "92bca64805b72cfc5c201c49060a8dcfaa4842d8fd527ecea7da8fb01dd4c016"
+    },
+    "confirmed_matches": [
+      "commands 5 and 6 register host-to-DSP and DSP-to-host message memory",
+      "32-byte audio_dsp_dram record offsets for physical address, host address and size",
+      "16-byte inner IPI header field offsets"
+    ],
+    "qualification_boundary": "Layer values, token/magic, payload limits and OEM commands 0x20a/0x20b differ; service memory-region and translation contract unfinished"
+  },
+  "primary_buffer_registration": {
+    "version": "0.1.3",
+    "api": "n1x_adsp_prepare_primary",
+    "task": 7,
+    "commands": [
+      5,
+      6,
+      522,
+      523
+    ],
+    "buffer_count": 4,
+    "buffer_bytes": 1024,
+    "pool": "first 4096 bytes of the existing boot-owned host shared-DRAM allocation",
+    "owner_until_release": "DSP boot allocation; no release operation or retry",
+    "firmware_route_check": {
+      "source": "native ASD0 _DSD in SSDT3",
+      "sha256": "6bd1b3801bc25048e2df874ed81594b3a7014df3f7f1eefc56efb935649e9131",
+      "hardware_version": 1,
+      "endpoint_mask": 511,
+      "speaker": 2,
+      "headphone": 2,
+      "microphone": 3,
+      "primary_image_id": "0xc0303",
+      "live_kernel_property_check": "n1x-lab/results/platform-enablement-20261106/dsp-primary-route-live.json"
+    },
+    "references": {
+      "dram_allocation": "nvadsp 0x140002618",
+      "memory_info_ioctl": "0x15202a, from nvasd literal 0x140023bf4 and nvadsp literal 0x140004254",
+      "pool_setup": "nvasd 0x140023550",
+      "address_translation": "nvasd 0x140025fe0",
+      "runtime_task_routing": "nvasd 0x140052840",
+      "registration": "nvasd 0x140025020",
+      "SRAM_task_mask": "nvasd literal 0x140025018 = 0x20010400, tasks 10/16/29"
+    },
+    "tests": "test_primary.py; actual C functions with ASan/UBSan",
+    "firmware_requests_hardware_validated": true,
+    "streaming_endpoint_implemented": false,
+    "hardware_evidence": "n1x-lab/results/platform-enablement-20261106/dsp-primary-registration-live.json"
+  },
+  "primary_task_lifecycle": {
+    "version": "0.1.4",
+    "api": [
+      "n1x_adsp_primary_open",
+      "n1x_adsp_primary_close"
+    ],
+    "exclusive": true,
+    "commands": [
+      1,
+      9,
+      2
+    ],
+    "packet_parameters": [
+      0,
+      0
+    ],
+    "raw_task7_requests": false,
+    "failure_policy": "terminal lifecycle error; handle consumed on close; retain published DMA and power",
+    "tests": [
+      "test_lifecycle.py",
+      "test_task_client.py",
+      "test_transport.py"
+    ],
+    "hardware_validated": false,
+    "wire_sequence_evidence": "n1x-lab/results/platform-enablement-20261106/dsp-primary-task-live.json (0.1.3 raw transport; does not qualify the 0.1.4 handle implementation)",
+    "pcm_stream_started": false,
+    "whole_core_shutdown_verified": false
+  },
+  "pcm_descriptor": {
+    "encoder": "n1x_adsp_pcm.h",
+    "wire_bytes": 96,
+    "test": "pcm_test.c",
+    "format_encoding": "container width in bits; not ALSA format enum",
+    "supported_encoder_containers": [
+      16,
+      32
+    ],
+    "hardware_validated": false,
+    "publishes_buffers": false,
+    "analysis_script": "scripts/analyze-dsp-pcm.py",
+    "analysis": "n1x-lab/results/platform-enablement-20261106/dsp-pcm-descriptor-analysis/report.json"
+  },
+  "primary_pcm_configuration": {
+    "version": "0.1.5",
+    "api": [
+      "n1x_adsp_primary_configure",
+      "n1x_adsp_primary_pcm_view"
+    ],
+    "commands": [
+      4,
+      513
+    ],
+    "host_ring_offset": 4096,
+    "message_slice": 0,
+    "afe_owner": "kernel/p16-afe-sram.patch",
+    "kernel_interface_snapshot": "mt8901-afe-sram.h",
+    "requires_bound_nonrunning_alsa_playback": true,
+    "host_and_afe_formats_must_match": true,
+    "publication_transfers_lease_to_dsp_boot_state": true,
+    "hardware_validated": false,
+    "stream_started": false,
+    "published_memory_release_verified": false,
+    "tests": "test_pcm_service.py",
+    "superseded_by": "primary_processing_pipeline 0.1.7",
+    "complete_native_pipeline": false
+  },
+  "primary_pcm_prepare": {
+    "version": "0.1.6",
+    "api": "n1x_adsp_primary_prepare_pcm",
+    "commands": [
+      515,
+      3
+    ],
+    "descriptor": "Initial host ring for both task-7 commands; not hardware descriptor",
+    "inline_bytes": 8,
+    "parameter2": 0,
+    "idempotent_after_success": true,
+    "firmware_failure_terminal": true,
+    "published_memory_release_verified": false,
+    "hardware_validated": false,
+    "tests": "test_pcm_service.py",
+    "analysis": "n1x-lab/results/platform-enablement-20261106/dsp-pcm-prepare-record-selection/report.json",
+    "native_driver_sha256": "a3eaa49ea54b1a7511542091efbd527000aeff4148753e68f179077c539224de",
+    "native_functions": {
+      "record_select": "0x14002b368",
+      "afe_prepare": "0x14002b3b8",
+      "host_prepare": "0x14002b5b0",
+      "primary_calls": [
+        "0x14002a7c0",
+        "0x14002a7cc"
+      ]
+    },
+    "remaining": [
+      "ALSA frontend and memif programming",
+      "Per-memif processing-task graph",
+      "START/STOP and period notifications",
+      "Verified whole-core quiesce, DMA release and reinitialization"
+    ],
+    "superseded_by": "primary_processing_pipeline 0.1.7",
+    "complete_native_pipeline": false
+  },
+  "primary_processing_pipeline": {
+    "version": "0.1.7",
+    "route": 2,
+    "primary_task": 7,
+    "processing_task": 16,
+    "core": "HiFi1",
+    "processing_message_memory": "Two 1 KiB AFE-owned SRAM slices; AFE/VAD address view",
+    "processing_registration": [
+      5,
+      6
+    ],
+    "processing_open": 1,
+    "configuration": [
+      [
+        7,
+        4,
+        "host"
+      ],
+      [
+        16,
+        513,
+        "hardware"
+      ],
+      [
+        16,
+        4,
+        "bridge"
+      ]
+    ],
+    "prepare": [
+      [
+        16,
+        515,
+        "hardware"
+      ],
+      [
+        16,
+        3,
+        "bridge"
+      ],
+      [
+        7,
+        515,
+        "host"
+      ],
+      [
+        7,
+        3,
+        "host"
+      ]
+    ],
+    "close": [
+      [
+        7,
+        9,
+        0
+      ],
+      [
+        7,
+        2,
+        0
+      ],
+      [
+        16,
+        9,
+        0
+      ],
+      [
+        16,
+        514,
+        1
+      ],
+      [
+        16,
+        2,
+        0
+      ]
+    ],
+    "raw_tasks_7_and_16_denied": true,
+    "published_ipc_retained_independently_of_pcm": true,
+    "route3_primary_group_unsupported": true,
+    "native_driver_sha256": "a3eaa49ea54b1a7511542091efbd527000aeff4148753e68f179077c539224de",
+    "analysis": "n1x-lab/results/platform-enablement-20261106/dsp-primary-processing-analysis/report.json",
+    "tests": [
+      "test_pcm_service.py",
+      "test_transport.py",
+      "afe/test_sram.py"
+    ],
+    "hardware_validated": false,
+    "stream_started": false,
+    "shutdown_release_verified": false,
+    "remaining": [
+      "ALSA frontend and hardware memif programming",
+      "START/STOP and period notifications",
+      "Hardware qualification of the complete task graph",
+      "Verified whole-core shutdown, DMA release and reinitialization"
+    ]
+  },
+  "primary_consumed_notification": {
+    "version": "0.1.8",
+    "api": [
+      "n1x_adsp_primary_set_period",
+      "n1x_adsp_primary_position"
+    ],
+    "class": 0,
+    "ack_mode": 0,
+    "task": 7,
+    "command": 27,
+    "packet_bytes": 288,
+    "read_pointer_offset": 48,
+    "counter_offset": 116,
+    "linux_payload_policy": {
+      "data_mode": 1,
+      "minimum": 96,
+      "maximum": 256,
+      "hardware_qualified": false
+    },
+    "counter_meaning": "CPU write-publication generation; not elapsed periods",
+    "nonzero_parameter2": "unsupported; no exception-bit meanings assigned",
+    "callback_context": "IRQ; caller must defer sleeping work",
+    "detach_and_close": "Clear listener under IPC spinlock, then synchronize_irq before releasing client data",
+    "bounds_and_counter_tests": "pcm_test.c",
+    "actual_irq_test": "test_driver.py",
+    "callback_and_teardown_concurrency_test": "test_period.py",
+    "analysis": "n1x-lab/results/platform-enablement-20261106/dsp-period-notification-analysis/report.json",
+    "hardware_validated": false,
+    "alsa_frontend_implemented": false,
+    "stream_started": false,
+    "whole_core_shutdown_release_verified": false
+  },
+  "primary_producer_publication": {
+    "version": "0.1.9",
+    "api": "n1x_adsp_primary_commit",
+    "message_slice": 0,
+    "descriptor_bytes": 96,
+    "mailbox_command": null,
+    "read_pointer": "Last validated raw firmware address, preserving the end boundary",
+    "write_pointer": "Host ring base plus frame-aligned caller byte offset, including end boundary",
+    "generation": "Publish current counter, then increment; INT_MAX wraps to zero",
+    "ordering": "DMA barrier before descriptor copy and before reporting completion; serialized against IRQ state updates",
+    "availability_owner": "Kernel stream client",
+    "late_power_failure": "Terminal; publication may have happened; retain memory and do not retry",
+    "native_method": "0x14002cc80",
+    "native_vtable": "0x1400b5570 +0xc8",
+    "analysis": "n1x-lab/results/platform-enablement-20261106/dsp-producer-publication-analysis/report.json",
+    "tests": [
+      "pcm_test.c",
+      "test_producer.py",
+      "test_pcm_service.py"
+    ],
+    "hardware_validated": false,
+    "firmware_atomic_descriptor_sampling_verified": false,
+    "stream_started": false,
+    "shutdown_release_verified": false
+  },
+  "afe_hardware_prepare": {
+    "version": "0.1.10",
+    "api": "mt8901_afe_sram_prepare",
+    "order": "Before all DSP PREPARE commands; symbol required before configuration publication",
+    "address_view": "AFE/VAD, not DSP",
+    "native_path": "Host address programming through Linux AFE owner; native START/STOP ownership remains under review",
+    "tests": "Actual owner and DSP prepare functions with ASan/UBSan, invalid ownership, nonzero SRAM offset, failures at each of the four checked base/end register writes and eight concurrent preparers",
+    "hardware_validated": false
+  },
+  "stream_transition_analysis": {
+    "analysis": "n1x-lab/results/platform-enablement-20261106/dsp-stream-owner-analysis/report.json",
+    "normal_start": "0x140029310, vtable +0x18",
+    "normal_stop": "0x140029a50, vtable +0x20",
+    "pause": "0x14002ab70, vtable +0x38",
+    "resume": "0x14002a8a0, vtable +0x40",
+    "correction": "Earlier trace misidentified hardware gain as IRQ; raw gain and IRQ register tables and vtables now checked separately",
+    "host_hardware_owner": "Context +0x98 is channel merge, +0xa8 is hardware gain; separate speaker IRQ object is +0x2a8",
+    "implemented": false,
+    "hardware_validated": false
+  },
+  "afe_irq_preparation": {
+    "version": "0.1.11",
+    "api": "mt8901_afe_sram_prepare_irq",
+    "endpoint_abi": 2,
+    "snapshot": "irq_prepared becomes true only on success",
+    "order": "Address preparation, four DSP PREPARE ACKs, disabled-IRQ counter/rate/domain preparation",
+    "source": "Current AFE IRQ metadata, rate callback and memif clock domain; pinned native table 0x1400ab040",
+    "error_contract": "Failed writes cache a terminal error; published memory retained; no subsequent firmware requests",
+    "irq_enabled_or_routed": false,
+    "hardware_validated": false
+  },
+  "primary_stream_transitions": {
+    "version": "0.1.12",
+    "api": [
+      "n1x_adsp_primary_start",
+      "n1x_adsp_primary_stop"
+    ],
+    "route": 2,
+    "mode": 0,
+    "start": [
+      {
+        "task": 16,
+        "command": 15,
+        "parameters": [
+          0,
+          0
+        ]
+      },
+      {
+        "task": 7,
+        "command": 15,
+        "parameters": [
+          0,
+          16
+        ]
+      }
+    ],
+    "stop": [
+      {
+        "task": 7,
+        "command": 16,
+        "parameters": [
+          0,
+          0
+        ]
+      },
+      {
+        "task": 16,
+        "command": 16,
+        "parameters": [
+          0,
+          0
+        ]
+      },
+      {
+        "owner": "AFE",
+        "operation": "mt8901_afe_sram_stop_irq",
+        "core": 3
+      }
+    ],
+    "preconditions": "Prepared active task graph, host producer publication, matching published ABI-2 endpoint and IRQ readiness",
+    "host_routing_owner": "Linux audio client; no gain, channel-merge or CPU memif enable writes in typed trigger",
+    "irq_stop": "Disable CFG0 bit 0; read/toggle CFG1 bit 31; remove owned MCU 0x9d00 and HiFi1 0x9d04 target bits",
+    "failure_contract": "Transaction or IRQ I/O failure is terminal; all published memory and references retained",
+    "listener_stop": "Detach and synchronize IRQ; client drains queued work separately",
+    "close": "STOP a started stream before existing HWFREE/CLOSE chain",
+    "restart_after_stop_implemented": false,
+    "whole_core_shutdown_verified": false,
+    "dma_release_verified": false,
+    "installed": false,
+    "hardware_validated": false,
+    "tests": [
+      "test_trigger.py",
+      "afe/test_sram.py"
+    ],
+    "analysis": "n1x-lab/results/platform-enablement-20261106/dsp-stream-owner-analysis/report.json"
+  },
+  "primary_alsa_frontend": {
+    "version": "0.1.13",
+    "primary_client_abi": 1,
+    "api": "n1x_adsp_primary_abi",
+    "source": "afe/mt8901-afe-dsp.c",
+    "integration": "Existing nonatomic AFE/DPCM DL0 playback and SoundWire/DAPM codec route",
+    "selection": "AFE dsp_playback read-only module parameter; false by default",
+    "configuration_phase": "PREPARE after ALSA runtime format/period assignment",
+    "application_memory": "Existing ALSA managed staging buffer; only newly acknowledged frames copied to DSP-owned coherent host ring",
+    "producer_contract": "ALSA-boundary and ring wrap, full-ring end boundary, no rewind or advance beyond ring",
+    "consumed_position": "Normalized host byte offset plus explicit at_end flag; firmware record unchanged",
+    "period_delivery": "IRQ byte accumulation; subperiod/duplicates ignored; complete periods coalesced in workqueue; no producer-generation-as-period inference",
+    "close_order": "Mark closing, detach/synchronize IRQ, drain queued work, consume primary handle and retire borrowed AFE substream",
+    "retirement": "No MMIO, DMA free or reference release; memif remains reserved",
+    "tests": [
+      "afe/test_frontend.py",
+      "afe/test_sram.py",
+      "test_pcm_service.py",
+      "test_trigger.py",
+      "pcm_test.c"
+    ],
+    "installed": false,
+    "hardware_validated": false,
+    "remaining": [
+      "Complete-stream hardware qualification and firmware memif/IRQ ownership confirmation",
+      "Restart after STOP and additional frontends",
+      "Verified whole-core quiesce, DMA/SROOT lease release and suspend/resume"
+    ]
   }
 }

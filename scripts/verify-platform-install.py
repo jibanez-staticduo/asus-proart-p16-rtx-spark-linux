@@ -18,7 +18,8 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGES = ("n1x-scp-dkms", "n1x-pluton-dkms", "n1x-sensorhub-dkms", "n1x-adsp-dkms",
-            "n1x-sroot-provider-dkms", "n1x-adsp-firmware-local", "n1x-sroot-firmware-local")
+            "n1x-sroot-provider-dkms", "n1x-adsp-firmware-local", "n1x-sroot-firmware-local",
+            "hid-sensor-als-dkms")
 
 
 def load(name, filename):
@@ -80,13 +81,14 @@ def main():
     live.check_target()
     report = {"captured_at": datetime.now(timezone.utc).isoformat(), "kernel": os.uname().release,
               "boot_id": boot_id, "reboot_verified": bool(args.after_boot_id),
-              "dsp_service_integration": False, "pluton_pcbi_service_integration": False,
+              "dsp_service_integration": False, "pluton_pcbi_query_service_verified": False,
+              "pluton_pcbi_control_service_integration": False,
               "sensor_calibration_accuracy": "unverified"}
     hashes, messages = late.boot_hashes(), live.kernel_messages()
     failure = None
     try:
         report["packages"] = run(["pacman", "-Q", *PACKAGES]).splitlines()
-        report["dkms"] = run(["dkms", "status"])
+        report["dkms"] = run(["dkms", "status"], timeout=120)
         service = "n1x-platform-npu.service" if Path("/usr/lib/systemd/system/n1x-platform-npu.service").exists() else "n1x-npu.service"
         report["npu_service_name"] = service
         if args.start_npu_service:
@@ -102,7 +104,7 @@ def main():
                 report["npu"]["status"].get("queue_poisoned") != "0":
             raise RuntimeError("NPU startup was not healthy")
         report["module_versions"] = {}
-        for name in ("n1x_scp", "n1x_pluton", "spi_hid", "spi_hid_acpi", "n1x_npu_bootstrap"):
+        for name in ("n1x_scp", "n1x_pluton", "spi_hid", "spi_hid_acpi", "n1x_npu_bootstrap", "hid_sensor_als"):
             path = Path("/sys/module") / name
             installed = run(["modinfo", "-n", name]).strip()
             built = run(["modinfo", "-F", "srcversion", name]).strip()
@@ -111,13 +113,29 @@ def main():
                 raise RuntimeError("Loaded/installed DKMS module differs: " + name)
             report["module_versions"][name] = {"path": installed, "srcversion": loaded}
         report["scp_version"] = Path("/sys/kernel/debug/n1x_scp/firmware_version").read_text().strip()
-        report["pluton"] = json.loads(run(["n1x-pluton-info", "--discover"], timeout=15))
+        report["pluton"] = json.loads(run(["n1x-pluton-info", "--discover", "--versions", "--services", "--device-info"],
+                                           timeout=45))
+        if 1 not in report['pluton'].get('pcbi_versions', []) or \
+                {'id': 1, 'version': 1} not in report['pluton'].get('pcbi_services', []):
+            raise RuntimeError('PCBI query service version 1 was not confirmed')
+        report['pluton_pcbi_query_service_verified'] = True
+        identity = report['pluton'].get('pcbi_device_info', {})
+        if identity.get('platform_id') != 6 or not identity.get('packages'):
+            raise RuntimeError('PCBI P16 firmware package metadata was not confirmed')
+        report['pluton_pcbi_device_info_verified'] = True
         devices = [p for p in Path("/sys/bus/iio/devices").glob("iio:device*") if
                    (p / "name").read_text().strip() == "als" and "spi" in str(p.resolve())]
         if len(devices) != 1:
             raise RuntimeError("Exactly one SPI ALS device did not enumerate")
         sensor = devices[0]
         scale = float((sensor / "in_illuminance_scale").read_text().strip())
+        report['als_channel_scales'] = {}
+        for name, expected in (('in_illuminance_scale', 0.1), ('in_intensity_scale', 0.1),
+                               ('in_colortemp_scale', 1.0), ('in_chromaticity_scale', 0.0001)):
+            value = float((sensor / name).read_text().strip())
+            report['als_channel_scales'][name] = value
+            if value != expected:
+                raise RuntimeError('ALS descriptor scale mismatch: ' + name)
         raw = []
         for _ in range(5):
             value = run(["/usr/bin/python", "-c",

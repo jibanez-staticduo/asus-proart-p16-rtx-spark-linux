@@ -12,11 +12,8 @@
 #include <linux/seq_file.h>
 #include <linux/vmalloc.h>
 
-/* nvSCP 2.17.0.0, SHA256 d1cc1ae1...901a47, logger setup at VA 1400050a8.
- * Firmware is platform-owned. This driver never starts/resets the SCP, changes
- * its power or calibration, or writes firmware variables. Optional mailbox
- * queries use the observed FreeRTOS 2.0.8.0 protocol (Cortex-M code 0x3ff0,
- * 0x40f8, 0x41a4). Register offsets come from the OEM nvSCP.inf.
+/* Firmware owns SCP startup, power management and sensor calibration.
+ * Mailbox queries require the FreeRTOS 2.0.8.0 dispatch ABI checked at probe.
  */
 #define N1X_LOG_OFFSET 0x76054
 #define N1X_LOG_HEADER_SIZE 0x10
@@ -89,11 +86,11 @@ static int n1x_scp_query(struct n1x_scp *scp, u16 command,
 	request.length = cpu_to_le16(length);
 	if (length)
 		memcpy(request.payload, payload, length);
-	/* The payload aperture is 64 words. The OEM driver copies 0x104 bytes,
-	 * crossing the 0x100 doorbell register. Copy only the initialized packet;
-	 * the firmware dispatches using the length in its eight-byte header.
+	/* The payload aperture ends at the 0x100 doorbell register. Copy only
+	 * the initialized packet; the header supplies its payload length.
 	 */
 	memcpy_toio(scp->mailbox[0], &request, round_up(8 + length, 4));
+	/* Publish the complete request before ringing the firmware doorbell. */
 	wmb();
 	iowrite32(BIT(0), scp->mailbox[0] + N1X_MBOX_IN_SET);
 	ret = readl_poll_timeout(scp->mailbox[1] + N1X_MBOX_OUT_STATUS,
@@ -219,9 +216,8 @@ static int n1x_scp_log_show(struct seq_file *seq, void *unused)
 }
 DEFINE_SHOW_ATTRIBUTE(n1x_scp_log);
 
-/* Capture firmware code/data for offline protocol analysis. Each open owns a
- * bounded copy, so an open descriptor cannot retain a devm MMIO pointer after
- * unbind. debugfs' protected open synchronizes the copy with device removal.
+/* Each open owns a bounded SRAM copy rather than a devm MMIO pointer.
+ * The protected debugfs open synchronizes the copy with device removal.
  */
 static int n1x_scp_snapshot_open(struct inode *inode, struct file *file)
 {
@@ -270,7 +266,7 @@ static int n1x_scp_probe(struct platform_device *pdev)
 	u16 capacity;
 	int ret;
 
-	/* This is the validated resource/log layout, not a claim for all N1X. */
+	/* The SRAM and mailbox layout below is specific to this BIOS. */
 	if (!dmi_match(DMI_PRODUCT_NAME, "ProArt P16 H7607BA") ||
 	    !dmi_match(DMI_BIOS_VERSION, "H7607BA.300"))
 		return -ENODEV;
@@ -290,8 +286,8 @@ static int n1x_scp_probe(struct platform_device *pdev)
 		return dev_err_probe(dev, ret, "platform SCP firmware log is not available\n");
 	if (enable_mailbox) {
 		static const resource_size_t bases[] = {0x1aaa0000, 0x1aab0000};
-		/* Dispatch and reply-header instructions observed in the captured
-		 * 2.0.8.0 firmware. Reject a different ABI even on the same BIOS.
+		/* Match the 2.0.8.0 dispatch and reply-header instructions before
+		 * enabling queries. BIOS version alone does not identify this ABI.
 		 */
 		static const u8 dispatch[] = {
 			0x63, 0x88, 0x2a, 0x46, 0x39, 0x46, 0x02, 0x20,
@@ -367,6 +363,6 @@ static struct platform_driver n1x_scp_driver = {
 	},
 };
 module_platform_driver(n1x_scp_driver);
-MODULE_DESCRIPTION("N1X SCP firmware queries and log reader (sensor IIO client pending)");
+MODULE_DESCRIPTION("N1X SCP firmware queries and log reader");
 MODULE_LICENSE("GPL");
 MODULE_VERSION("0.2.0");

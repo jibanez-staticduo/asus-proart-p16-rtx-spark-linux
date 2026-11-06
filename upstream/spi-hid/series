@@ -1,0 +1,4 @@
+0001-HID-spi-hid-retry-ACPI-GPIO-IRQ-lookup-at-probe.patch
+0002-HID-spi-hid-evaluate-reset-on-the-ACPI-handle.patch
+0003-HID-spi-hid-serialize-and-type-GET-report-responses.patch
+0004-HID-spi-hid-handle-P16-stream-only-input-reports.patch

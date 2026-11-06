@@ -13,10 +13,10 @@ import tempfile
 
 PACKAGES = {"n1x-scp-dkms": "n1x_scp", "n1x-pluton-dkms": "n1x_pluton",
             "n1x-adsp-dkms": "n1x_adsp", "n1x-sroot-provider-dkms": "n1x_npu_bootstrap",
-            "n1x-adsp-firmware-local": None}
+            "n1x-adsp-firmware-local": None, "hid-sensor-als-dkms": "hid_sensor_als"}
 
 
-def npu_initramfs_audit(boot_root=Path('/boot')):
+def late_module_initramfs_audit(modules, label, boot_root=Path('/boot')):
     path = Path(__file__).with_name("verify-boot.py")
     spec = importlib.util.spec_from_file_location("late_boot_verify", path)
     verify = importlib.util.module_from_spec(spec)
@@ -31,12 +31,17 @@ def npu_initramfs_audit(boot_root=Path('/boot')):
             initrd = Path(directory) / "initrd"
             initrd.write_bytes(sections[".initrd"])
             listing = subprocess.check_output(["lsinitcpio", str(initrd)], text=True)
-            if re.search(r"(?:^|/)(?:n1x_npu_bootstrap|n1x-npu-bootstrap)\.ko(?:\.(?:zst|xz|gz))?$", listing, re.M):
-                raise RuntimeError("NPU is embedded in this UKI; stage an explicit image update before provider installation: " + str(image))
+            names = '|'.join(re.escape(name) for name in modules)
+            if re.search(r"(?:^|/)(?:" + names + r")\.ko(?:\.(?:zst|xz|gz))?$", listing, re.M):
+                raise RuntimeError(label + " is embedded in this UKI; stage an explicit image update before installation: " + str(image))
             checked.append(str(image))
     if not checked:
         raise RuntimeError('No Linux UKIs found for late-provider validation')
     return checked
+
+
+def npu_initramfs_audit(boot_root=Path('/boot')):
+    return late_module_initramfs_audit(('n1x_npu_bootstrap', 'n1x-npu-bootstrap'), 'NPU', boot_root)
 
 
 def boot_hashes():
@@ -70,6 +75,8 @@ def main():
     before = boot_hashes()
     provider = any(info[0] == "n1x-sroot-provider-dkms" for info in infos)
     audit = npu_initramfs_audit() if provider else None
+    als_audit = late_module_initramfs_audit(('hid_sensor_als', 'hid-sensor-als'), 'ALS') \
+        if any(info[0] == 'hid-sensor-als-dkms' for info in infos) else None
     with tempfile.TemporaryDirectory(prefix="p16-scp-hooks-") as temporary:
         # These modules are not initramfs dependencies. Skip only the broad image
         # regeneration for this transaction. All configured preflight/DKMS
@@ -86,6 +93,8 @@ def main():
                "boot_artifacts_unchanged": before == after, "package_exit": transaction.returncode}
     if audit is not None:
         receipt["npu_not_embedded_in_ukis"] = audit
+    if als_audit is not None:
+        receipt['als_not_embedded_in_ukis'] = als_audit
     if transaction.returncode == 0:
         try:
             receipt["dkms"] = {}
