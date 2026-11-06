@@ -13,11 +13,7 @@ addresses in the pinned drivers.
 | `nvasd.sys` | 2.13.0.0 | `a3eaa49ea54b1a7511542091efbd527000aeff4148753e68f179077c539224de` |
 | `nvpep.sys` | 2.6.0.0 | `34cf1f2a9372a092555fb0887bfb76a8f205a76ff7e557224b353b09497c9bb1` |
 
-All three drivers are now pinned in `config/platform-oem.json`. The new audio
-client and power-driver inputs were independently reconstructed from the outer
-ASUS recovery archive after its SHA256 matched `config/platform-sources.json`.
-All 17 selected inputs passed size/hash verification. The extraction receipt is
-`n1x-lab/platform/sources/vendor/platform-drivers.receipt.json`.
+The input hashes are pinned in `config/platform-oem.json`.
 
 `nvasd.inf` identifies its driver as the ACX Streaming Device for `NVDA9022`.
 The driver contains separate MT8195 and MT8901 implementations. Only the
@@ -40,16 +36,7 @@ on this board.
 | 8 | 32 bits | Firmware notification value |
 | 12 | 32 bits | 0 |
 
-The same GUID occurs at `nvpep` address `0x140047b80`. Its handler
-`0x14001ff38` checks for a non-null input of exactly 16 bytes,
-then ORs the request byte and three input words into the per-device SCMI
-configuration before calling `0x1400169d0`. This is the same operation as
-Linux `mtk_send_power_control_req()` in `drivers/soc/mediatek/power_wrap/`.
-The field mapping is therefore supported by both caller and receiver code.
-One such notification completed through SSPM during the November 6 task
-lifecycle trial (`dsp-primary-task-live.json`).
-
-The Linux candidate queues these notifications and dispatches them from a
+The Linux driver queues these notifications and dispatches them from a
 worker. It records the first submission error or queue overflow and performs
 no further power submissions for that instance. This does not establish a
 DSP shutdown contract: `0xf005` is a firmware-initiated request, not a host
@@ -84,14 +71,6 @@ offset 16. Its acknowledgement matcher compares that 16-bit value. Its client
 notification matcher compares the first 32-bit packet field and the byte at offset 18.
 Those are separate matching paths and must not share an untyped completion.
 
-`n1x_adsp_ipc.h` implements the observed request constructor and field decoder
-as an internal codec. Its tests cover literal wire vectors, maximum payloads,
-untouched outputs on rejection, every packet truncation, and separation of
-acknowledgements from notifications. The codec is used by the kernel
-request/reply transport described below. It does not define a userspace ABI.
-Hardware transmission was qualified by the November 6 primary registration
-and task lifecycle trials described below.
-
 ## Mailbox slots and ownership
 
 `nvadsp` function `0x140030000` maps the final 1024 bytes of shared SRAM as the
@@ -115,7 +94,7 @@ publishes the interrupt after a barrier. The INF pins inbound status/set to
 mailbox offset `0x100`, outbound status to `0x104`, and outbound clear to
 `0x10c`. Interrupt index zero uses bit zero of the inbound set register.
 
-The Linux `n1x_adsp_transfer()` kernel client API now serializes each request
+The Linux `n1x_adsp_transfer()` kernel client API serializes each request
 through ACK completion and TX-slot release. It assigns a nonzero token, marks
 the busy word, copies the complete packet, orders the writes, then rings bit 0.
 The IRQ routes class-0, ACK-mode-2 packets to the transaction completion and
@@ -172,7 +151,7 @@ initializes private pools, and translates pool addresses before registration.
 The primary-task DRAM ownership and translation are established below. The
 AFE stream-buffer mapping remains a separate requirement for audio streaming.
 
-## P16 primary message buffers
+## Primary message buffers
 
 The current firmware SSDT containing `ASD0` has SHA256
 `6bd1b3801bc25048e2df874ed81594b3a7014df3f7f1eefc56efb935649e9131`.
@@ -212,15 +191,6 @@ and command. Other firmware-owned regions and the AFE SRAM are not used by
 this operation. Success records four completed registrations; it does not
 establish stream execution or permit freeing any of those slices.
 
-`test_primary.py` compiles the actual route, registration and exported client
-functions under ASan/UBSan. It checks both core-route mappings, missing or
-inconsistent properties, all four failure positions, exact payload words and
-memory bounds, idempotence, terminal errors and late power failures. A separate
-read-only kernel validation module confirmed the current speaker/headphone
-properties through the same firmware-node API, then unloaded without changing
-DSP bindings or submitting firmware requests. Its receipt is
-`n1x-lab/results/platform-enablement-20261106/dsp-primary-route-live.json`.
-
 All four registrations subsequently received matching ACKs on HiFi1. A second
 trial sent scalar commands 1 (OPEN), 9 (HWFREE) and 2 (CLOSE), with parameters
 zero and ACK mode 1; all three received matching task/command replies. This
@@ -229,14 +199,10 @@ constructor `0x14002c288`. Reports are `dsp-primary-registration-live.json` and
 `dsp-primary-task-live.json` in the same results directory. No HWPARAM, PREPARE
 or START was sent. CLOSE does not establish whole-core DMA quiescence.
 
-The uninstalled 0.1.4 candidate wraps that sequence in an exclusive kernel
-handle. The DSP lock serializes ownership, registration and each lifecycle
-request. OPEN failure prevents another open; close stops on the first failed
-request and consumes the CPU-only handle while preserving boot-owned DMA and
-terminal task state. A successful close permits another open using the existing
-registrations. Raw task-7 requests are rejected by the public transport API.
-The handle implementation and validation client require their own hardware
-qualification; the 0.1.3 trial does not prove those new code paths.
+The exclusive kernel handle serializes ownership, registration and lifecycle
+requests. OPEN failure prevents another open. Close consumes the CPU handle
+but preserves published memory and terminal state after a failed transaction.
+Raw task-7 requests are rejected by the public transport API.
 
 ## PCM descriptors
 
@@ -270,28 +236,14 @@ checks complete-period byte length and arithmetic overflow, and leaves its
 destination unchanged on error. Actual endpoint format policy and address
 ownership remain the caller's responsibility.
 
-`pcm_test.c` checks fixed host and AFE wire vectors, container width, every
-truncated destination and invalid/range-overflow inputs under ASan/UBSan.
-`scripts/analyze-dsp-pcm.py` reproduces the pinned instruction extracts and
-checks the initial task records. Results are in
-`n1x-lab/results/platform-enablement-20261106/dsp-pcm-descriptor-analysis/`.
-
 The native default allocator selector is 3. Its mode-table entry passes through
 `0x140044010`, the common constructor's parameter offset `0x1d8`, stream offset
 `0x218`, and the primary constructor's parameter offset `0x84` into context
 offset `0x1b4`. Selector 3 selects AFE pool 0. This traces the static default;
-it is not a live Windows endpoint observation. Linux's current AFE driver
-allocates PCM DRAM and has no SRAM allocator. Exclusive AFE SRAM ownership,
-runtime power/DAI integration, notifications and actual stream qualification
-are still required before publishing these descriptors.
+it is not a live Windows endpoint observation. Linux uses the AFE SRAM owner for exclusive leases and address translation;
+actual stream qualification remains required.
 
 ## Primary playback processing chain
-
-Candidate `0.1.7` implements the P16 route-2 configuration graph. The preceding
-0.1.5/0.1.6 candidates sent AFE HWPARAM directly to task 7 and omitted the
-per-memif processing task. Their offline tests qualified their packet fields
-and lifetime guards, but did not establish a complete native stream graph.
-Neither candidate was installed or used to start a stream.
 
 The pinned `nvasd` constructor selects primary task 7 from free tasks 7..9
 for the speaker/headphone route 2. `0x140027438` inserts the first free task
@@ -299,7 +251,7 @@ for the speaker/headphone route 2. `0x140027438` inserts the first free task
 assigns both groups to native core enum 3 (HiFi1) on route 2. The exclusive
 Linux primary API uses the first member of each group, 7 and 16. Route 3
 selects a different native primary group; the task-7 API rejects it before
-registration. That graph is not implemented by this candidate.
+registration. That graph is not implemented.
 
 The message allocator's mask at `0x140025018` is `0x20010400`. Task 16 therefore
 uses SRAM message buffers, unlike task 7's boot-owned coherent DRAM. Task 16
@@ -307,7 +259,7 @@ requires host-message registrations 5 and 6, each with a 32-byte payload
 `{device address, CPU address, 1024, 0}`. The processing-message selector at
 `0x140024998` excludes task 16, so `0x20a` and `0x20b` are not sent to it.
 Native core enum 3 uses address translation selector 2, the AFE/VAD SRAM view.
-The candidate reserves one contiguous 2 KiB IPC lease from the AFE owner and
+The driver reserves one contiguous 2 KiB IPC lease from the AFE owner and
 registers its two slices. Publication precedes the first registration; an
 uncertain reply retains the entire lease and prevents replay.
 
@@ -364,20 +316,9 @@ matching ACKs are required before marking the chain prepared. Repeated success
 revalidates the endpoint without further IPC. A firmware-stage error stops
 requests and retains all published rings and message buffers.
 
-Reproducible instruction ranges, binary hashes, the SRAM mask and decoded
-record-selection table are in
-`n1x-lab/results/platform-enablement-20261106/dsp-primary-processing-analysis/`.
-Run `scripts/analyze-dsp-pcm.py` against the pinned driver to reproduce them.
-The candidate's actual C is exercised under ASan/UBSan with mocked OS, AFE and
-RPC edges. Tests check task/command ordering, the three descriptors, SRAM
-registration addresses, preflight failures, every configure/prepare timeout
-and wrong reply, close failures, independent IPC retention, idempotence and
-sample/canary preservation. These are offline checks; no streaming endpoint,
-START/STOP, period notification or shutdown/release is hardware-qualified.
-
 ## Consumed-data notification client
 
-Candidate `0.1.8` adds `n1x_adsp_primary_set_period()` and the non-sleeping
+`n1x_adsp_primary_set_period()` and the non-sleeping
 `n1x_adsp_primary_position()` API. Position tracking starts only after all four
 PREPARE acknowledgements. Before the first accepted notification, its snapshot
 has `valid=false` and offset zero. Before prepare, pointer reads return
@@ -395,7 +336,7 @@ periods or a basis for an absolute consumed-byte count.
 
 The Linux parser accepts inline data mode 1 and payload lengths 96..256 bytes,
 checks the full 288-byte packet extent and ignores untrusted outer wrapper
-lengths. This is the candidate's bounds policy; a live stream has not qualified
+lengths. This is the driver's bounds policy; a live stream has not qualified
 that firmware envelope. It validates the read pointer against the complete
 owned host-ring extent and frame alignment. An end pointer equal to the
 end-exclusive boundary normalizes to offset zero. Counter values above
@@ -403,7 +344,7 @@ end-exclusive boundary normalizes to offset zero. Counter values above
 zero may restart the generation, matching the native callback. Equal pointers
 and counters can yield another accepted notification after a ring wrap.
 
-The native callback ignores nonzero parameter 2. The candidate reports that
+The native callback ignores nonzero parameter 2. The driver reports that
 case as unsupported instead of assigning meanings to unverified exception
 bits. A recognized malformed notification caches an error and delivers one
 error callback with the last valid snapshot. No address from that packet is
@@ -418,7 +359,7 @@ or call sleeping DSP APIs. It may call the atomic position getter. Each
 accepted consumed-data message produces a listener event; the eventual ALSA
 frontend must translate position changes into ALSA period progress. Direct
 ALSA period delivery for a non-atomic stream must be deferred to suitable
-process context. The current driver does not provide that frontend.
+process context. The DL0 frontend defers delivery to queued work.
 
 A listener can be installed once, detached with a NULL callback, then replaced.
 Detach clears its function/data pointers under the spinlock and waits for
@@ -431,31 +372,14 @@ completes. Later IRQs cannot call the old listener. ASan/UBSan exercises the
 actual C, including the real IRQ slot-release path, bounds failures, stale
 packets, counter restart, wrong ACK/class/task and transport/power errors.
 
-Pinned disassembly for both native drivers is in
-`n1x-lab/results/platform-enablement-20261106/dsp-period-notification-analysis/`.
-Reproduce it with `scripts/analyze-dsp-pcm.py --mailbox-binary /path/to/nvadsp.sys`
-and the pinned `nvasd.sys` input. The new parser and callback interfaces remain
-uninstalled and are not hardware-qualified. START/STOP, the ALSA frontend,
-producer publication and verified shutdown/release remain required.
-
 ## Host producer publication
 
-Candidate `0.1.9` adds `n1x_adsp_primary_commit(primary, byte_offset)`. After
+`n1x_adsp_primary_commit(primary, byte_offset)`. After
 configure and prepare, the kernel client obtains `pcm_view`, fills samples and
 commits its frame-aligned byte cursor. The caller owns availability and must
 serialize writes to samples and the handle's lifetime. The API bounds the cursor
 and descriptor; it does not calculate ALSA free frames from notification
-counts. START/STOP and the ALSA frontend remain separate work.
-
-The native producer method `0x14002cc80` is selected by the stream vtable at
-`0x1400b5570`, offset `0xc8`. It writes ring base plus the caller's byte offset
-into the host record, copies that record's 96-byte snapshot at offset `0x60`
-to the CPU pointer at offset `0x158` (command-5 message memory), and advances
-its generation counter. There is no mailbox send on this method's success
-path. The alternate vtable method at offset `0xd0`, `0x14002ce90`, has a separate
-resume special case and is not implemented by this normal commit API.
-The vtable targets and instruction ranges are pinned in
-`n1x-lab/results/platform-enablement-20261106/dsp-producer-publication-analysis/`.
+counts. The frontend supplies ALSA availability accounting.
 
 The producer encoder retains the configured host fields and changes only the
 read pointer, write pointer and counter. The read pointer is the last validated
@@ -574,12 +498,11 @@ a sufficient Linux release contract. A Linux implementation must distinguish
 a validated completed upload from uncertain submission/completion and retain
 uncertain allocations. Releasing a successfully consumed image buffer also
 does not establish that DSP operating memory can be released or that another
-core may be powered down. The current broker and DSP driver still retain both
-classes of published allocations in the installed version. The v2 candidate
-below separates consumed image staging from the retained DSP lifetime lease.
+core may be powered down. The v2 API separates consumed image staging from the retained DSP lifetime
+lease.
 
-Candidate `0.1.14` uses `n1x_sroot_upload_dsp_v2()`. The provider shares v1's
-boot mutex, image pins and one-attempt policy, and retains its module/runtime-PM
+The DSP driver uses `n1x_sroot_upload_dsp_v2()`. The provider shares v1's
+boot mutex, container checks and one-attempt policy, and retains its module/runtime-PM
 reference before publication. It releases the temporary image buffer only when
 the serialized exchange completes with command `0x18`, raw reply header exactly
 `0x18`, zero payload words, and zero status/detail. It then clears the CPU/DMA
@@ -593,13 +516,6 @@ power or publishing operating memory, and rejects inconsistent success fields
 even if a ready notification has arrived. No operating DSP DRAM or AFE SRAM,
 provider lease, module reference or runtime-PM vote is released by this API.
 
-`scripts/analyze-dsp-shutdown.py` checks both pinned PE hashes and extracts the
-allocation/copy/exchange/free call order, the DMA free-table slot and the PEP
-GET constants. Its receipt is
-`n1x-lab/results/platform-enablement-20261106/dsp-shutdown-staging-analysis/report.json`.
-The PEP's three query words still have no verified DMA-off interpretation.
-No GET or power-off request was sent as part of this work.
-
 The provider's actual-function sanitizer harness covers every prepublication
 and exchange failure, noncanonical replies, all three successful images,
 v1/v2 interoperation and eight concurrent same-image callers. Shutdown tests
@@ -611,7 +527,7 @@ shutdown/DMA release remains unfinished.
 
 ## Linux AFE hardware-ring preparation
 
-Candidate `0.1.10` adds `mt8901_afe_sram_prepare()`. The existing lease bind
+`mt8901_afe_sram_prepare()`. The existing lease bind
 and publication operations did not replace the memif's previous DRAM address.
 Before the first DSP PREPARE, the DSP client now asks the AFE owner to program
 its published SRAM ring, checking all four base/end register writes.
@@ -627,23 +543,20 @@ with setup and teardown. No memif or IRQ is enabled.
 After success, repeated calls validate ownership without writing registers.
 Failure after programming begins is cached and retains all published resources;
 the DSP client also caches the error and sends no PREPARE or CLOSE afterward.
-The native memif/IRQ trigger ownership and Linux frontend remain separate work.
+The selected DSP frontend owns the corresponding trigger path.
 
 The actual-function sanitizer harness covers a nonzero allocation offset,
 incorrect owners/format/IRQ, failures at each of the four address writes and
 eight concurrent preparers. The PCM service harness verifies AFE preparation precedes all four
 DSP PREPARE commands, that a missing helper prevents configuration publication,
-and that owner errors are terminal. The preceding `0.1.9` source fails the same
-prepare-order regression check. All results are offline; no live AFE memory
+and that owner errors are terminal. All results are offline; no live AFE memory
 or firmware request was used.
 
 ## Ordinary stream transitions versus pause/resume
 
 The pinned stream vtable at `0x1400b5570` selects normal START at `+0x18`
 (`0x140029310`), normal STOP at `+0x20` (`0x140029a50`), pause at `+0x38`
-(`0x14002ab70`) and resume at `+0x40` (`0x14002a8a0`). The older extraction
-script incorrectly named the last function `stream_start`. Those earlier
-extracts do not establish a normal START sequence.
+(`0x14002ab70`) and resume at `+0x40` (`0x14002a8a0`).
 
 For a fresh, single-user route-2 playback graph, normal START increments the
 memif/DSP user counts, acquires processing-task QoS if requested, sends each
@@ -662,21 +575,13 @@ quiescence or permit DMA release.
 
 The native object at context `+0x98` is a channel merge: `0x14003d290`
 constructs it using the `mt8901_afe_cm.cpp` path and a channel-merge ID below 3.
-The object at `+0xa8` owns hardware gain. The preceding analysis incorrectly
-identified it as IRQ. Its table at `0x1400ac240` enables register `0x9800`,
+The object at `+0xa8` owns hardware gain. Its table at `0x1400ac240` enables register `0x9800`,
 bit 16, which is `AFE_GAIN_DL0_CON0`. Its reference-count code identifies
 `afe_memif_hwgain.cpp`. Treating either object as a generic CPU memif enable
 would be incorrect. The stock Linux AFE trigger additionally
 enables/disables the memif; firmware ownership of that operation must be
-resolved before connecting the Linux audio frontend. The typed task trigger
+qualified on the selected Linux frontend. The typed task trigger
 does not perform those host register writes.
-
-`scripts/analyze-dsp-pcm.py` now checks the transition vtable targets and emits
-separate normal-start, stop, pause, resume, scalar-command, QoS and host-owner
-instruction ranges. The final extraction receipt is
-`n1x-lab/results/platform-enablement-20261106/dsp-stream-owner-analysis/report.json`.
-It supersedes the gain/IRQ labels in the preceding transition-analysis receipt.
-It is static protocol evidence, not hardware qualification.
 
 ## Separate IRQ preparation and endpoint ABI 2
 
@@ -687,7 +592,7 @@ The descriptor table is `0x1400ab040`, with 22 records of 64 bytes. IRQ 0 uses
 counter register `0x9d44`, bits 23:0, rate register `0x9d40`, bits 8:4, and
 domain bits 11:9. These match the Linux MT8901 IRQ metadata. The pinned native
 IRQ-12 record reuses IRQ-11 register offsets; this anomaly is recorded, not
-copied into Linux. The playback candidate uses IRQs 0..6.
+copied into Linux. The playback path uses IRQs 0..6.
 
 For a fresh start, speaker handler `0x140083a10` prepares the IRQ after the
 stream's configuration/PREPARE method, starts the DSP stream, then takes the
@@ -697,7 +602,7 @@ disables the last-user IRQ and clears its target; native HiFi1 enum 3 uses
 `0x9d04`. The normal stream's gain helpers cannot supply this IRQ contract.
 Actual firmware START behavior still needs hardware qualification.
 
-Candidate `0.1.11` implements the configuration step as a separate AFE-owner
+The driver implements the configuration step as a separate AFE-owner
 operation after the four DSP PREPARE acknowledgements. It checks the current
 non-running substream/DAI/IRQ and address-prepared state, verifies the exact
 register layout, obtains the rate code and active memif clock domain from the
@@ -716,12 +621,11 @@ Actual-function sanitizer tests verify both preparation phases, all register
 write failures, owner/layout/rate/domain/bounds faults, unrelated-bit
 preservation, active-IRQ refusal and concurrent idempotence. The DSP harness
 checks the complete order, old-ABI and missing-helper rejection, and no retry
-or CLOSE after IRQ failure. These checks do not implement START/STOP or prove
-whole-core quiescence. No new module or hardware request was used.
+or CLOSE after IRQ failure. These checks do not prove whole-core quiescence. No new module or hardware request was used.
 
 ## Typed route-2 START/STOP
 
-Candidate `0.1.12` sends command `0x0f` to task 16 with scalar parameters
+The driver sends command `0x0f` to task 16 with scalar parameters
 `(0, 0)`, then to task 7 with `(0, 16)`. It supports normal playback mode 0
 after the existing OPEN/HWPARAM/PREPARE chain, one host producer publication
 and a matching, published ABI-2 endpoint with IRQ readiness. It validates the
@@ -748,8 +652,7 @@ START/STOP transaction errors and failed IRQ cleanup are terminal and preserve
 all published memory and references. Close stops a started stream before
 HWFREE/CLOSE. Restart after STOP is rejected until reinitialization, which is
 not yet implemented. Neither STOP acknowledgements nor IRQ disable establish
-whole-core DMA quiescence or authorize buffer release. No candidate transition
-has been hardware-qualified.
+whole-core DMA quiescence or authorize buffer release. The transitions remain hardware-unqualified.
 
 `test_trigger.py` compiles the actual control and lifecycle functions with
 ASan/UBSan. Independent wire vectors check both START scalar parameter pairs
@@ -761,7 +664,7 @@ playback IRQs and preservation of unrelated target bits.
 
 ## AFE/DPCM playback frontend and borrowed lifetime
 
-Candidate `0.1.13` integrates a DL0 playback client into the existing nonatomic
+The driver integrates a DL0 playback client into the existing nonatomic
 AFE/SoundWire frontend. The AFE `dsp_playback` parameter defaults to false and
 is read-only after module load. The client requires `n1x_adsp_primary_abi()`
 to return primary-client ABI 1 before OPEN. This contract includes retained
@@ -770,9 +673,8 @@ offset. The flag distinguishes a firmware read address at the end boundary
 from the base address; the firmware wire record is unchanged.
 
 The frontend reserves/configures its hardware ring in PREPARE, after the ALSA
-core assigns runtime format and period fields. The host and hardware rings
-use the negotiated geometry, with at most 78 KiB available after processing
-IPC slices. DPCM/DAPM keeps the existing codec route. The DSP trigger replaces
+core assigns runtime format and period fields. The host and hardware rings use the negotiated geometry, bounded by the
+firmware-described SRAM capacity after processing IPC reservations. DPCM/DAPM keeps the existing codec route. The DSP trigger replaces
 the stock CPU memif/MCU-IRQ trigger on this selected path; complete-stream
 hardware qualification is required to confirm firmware operation on Linux.
 
@@ -801,5 +703,5 @@ No retirement operation writes registers or establishes DMA quiescence.
 Reconfiguration after publication, restart after STOP, pause/resume and other
 frontends remain unsupported. Actual-function sanitizer tests cover helper/ABI
 faults, producer/boundary vectors, partial/coalesced notifications and close
-against a blocked period worker. The complete path remains uninstalled and
+against a blocked period worker. The complete path remains and
 has no hardware streaming qualification.

@@ -1,1 +1,5 @@
-obj-m += n1x_scp.o
+# SPDX-License-Identifier: GPL-2.0-only
+ifeq ($(KBUILD_EXTMOD),$(abspath $(src)))
+CONFIG_N1X_SCP ?= m
+endif
+obj-$(CONFIG_N1X_SCP) += n1x_scp.o

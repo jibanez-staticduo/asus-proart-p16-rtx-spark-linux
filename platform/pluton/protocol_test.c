@@ -10,7 +10,6 @@
 
 _Static_assert(sizeof(struct n1x_pluton_info) == 32, "info ABI");
 _Static_assert(sizeof(struct n1x_pluton_channels) == 40, "channels ABI");
-_Static_assert(sizeof(struct n1x_pluton_exchange) == 40, "exchange ABI");
 _Static_assert(sizeof(struct n1x_pluton_query) == 32, "query ABI");
 _Static_assert(N1X_PLUTON_QUERY == 0xc0205003U, "query ioctl number");
 

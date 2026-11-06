@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: GPL-2.0-only
+menu "NVIDIA N1X platform drivers"
+
+config N1X_ADSP
+	tristate "NVIDIA N1X / MediaTek MT8901 audio DSP"
+	depends on ARM64 && ACPI && PM && MTK_POWER_WRAP && IOMMU_DMA
+	select FW_LOADER
+	help
+	  Secure firmware loading and task IPC for the MT8901 audio DSPs.
+	  Firmware startup is disabled by default. Published memory cannot
+	  be reclaimed until a complete DSP shutdown protocol is available.
+
+config N1X_SCP
+	tristate "NVIDIA N1X SCP firmware diagnostics"
+	depends on ARM64 && ACPI && HAS_IOMEM && DEBUG_FS
+	help
+	  Read firmware logs and issue bounded version and descriptor queries
+	  to the platform-owned SCP. Sensor measurements use the HID/IIO path.
+
+config N1X_PLUTON
+	tristate "NVIDIA N1X Pluton PCBI query service"
+	depends on ARM64 && ACPI && HAS_IOMEM
+	help
+	  Support the ROT1 PFI mailbox and PCBI metadata query service.
+	  Firmware transactions require the enable_transport module parameter.
+
+config N1X_PROTOCOL_KUNIT_TEST
+	tristate "N1X platform protocol tests" if !KUNIT_ALL_TESTS
+	depends on KUNIT
+	default KUNIT_ALL_TESTS
+	help
+	  Test DSP IPC, PCM descriptors, signed firmware envelopes and Pluton
+	  PCBI packets. These tests do not access hardware or start firmware.
+
+endmenu

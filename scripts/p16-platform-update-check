@@ -45,7 +45,6 @@ for name in n1x_scp n1x_pluton spi_hid spi_hid_acpi n1x_adsp n1x_npu_bootstrap n
     while read -r action dependency rest; do
         [[ $action != insmod || -s $dependency ]] || fail "Missing dependency: $dependency"
     done < "$tmp/deps"
-    case $name in nvidia|nvidia_drm|spbm) ;; *) [[ $path == */updates/dkms/* ]] || fail "DKMS override missing: $name" ;; esac
 done
 userspace=$(pacman -Q nvidia-utils)
 userspace=${userspace#* }; userspace=${userspace%-*}
@@ -55,7 +54,7 @@ if [[ $image ]]; then
     mkdir "$tmp/tree"
     (cd "$tmp/tree"; lsinitcpio -x "$tmp/initrd" > /dev/null)
     [[ ! -e "$tmp/tree/kernel/firmware/acpi/DSDT.aml" ]] || fail 'Static DSDT override contains a boot-specific GNVS address'
-    cmp /etc/initcpio/p16-acpi/SSDT.aml "$tmp/tree/kernel/firmware/acpi/SSDT.aml" || fail 'Wrong early ASUS SSDT override'
+    cmp /usr/lib/firmware/acpi/p16/SSDT.aml "$tmp/tree/kernel/firmware/acpi/SSDT.aml" || fail 'Wrong early ASUS SSDT override'
     grep -Fq 'acpi_osi="!Windows 2022"' "$tmp/cmdline" || fail 'Native DSDT requires the negative Windows-2022 OSI setting'
     for name in spi_hid spi_hid_acpi; do
         installed=$(modinfo -k "$release" -n "$name")

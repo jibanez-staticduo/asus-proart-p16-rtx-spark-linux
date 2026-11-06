@@ -33,12 +33,6 @@ platform changes. Original prerequisite authorship and sign-offs are
 preserved. Import dates can change commit IDs; the resulting source and
 patch IDs are reproducible.
 
-The local branch is `p16/spi-hid-review-20261106` in the sibling
-`n1x-lab/platform/sources/upstream/hid-review` Git repository. Its worktree
-is `hid-p16-review-20261106`. The verified bundle at
-`build/hid-target-20261106/p16-spi-hid-review.bundle` preserves the exact
-review commits and requires the official maintainer base.
-
 ## Validation
 
 The build report is `build/hid-target-20261106/report.json` in this
@@ -72,10 +66,6 @@ prerequisite callback returns caller 2's payload to caller 1; the fixed
 callback prevents replacement until caller 1 has copied its complete reply.
 The saved baseline is in `build/hid-target-20261106/`.
 
-The platform suite and firmware/resource regression tests pass. The standalone package candidate
-`n1x-sensorhub-dkms 0.1.0-3` also builds without warnings for all five
-installed kernel headers; it changes reset diagnostics to debug level and
-is not installed. The live module remains package version `0.1.0-1`.
 Runtime lockdep on this target kernel and testing on other SPI HID hardware
 remain open. Known prerequisite limitations, including fragmented reports,
 are outside these four fixes.

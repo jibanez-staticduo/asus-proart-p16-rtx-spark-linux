@@ -1,0 +1,104 @@
+pkgname=p16-platform-policy
+pkgver=1.2.0
+pkgrel=1
+pkgdesc='ASUS P16 platform configuration and managed kernel update checks'
+arch=('aarch64')
+license=('MIT')
+depends=('bash' 'binutils' 'coreutils' 'dkms' 'kmod' 'mkinitcpio' 'systemd' 'util-linux' 'p16-acpi-firmware')
+source=('p16-acpi'
+        'zz-p16-hardware-fixes.conf'
+        'zz-p16-input.conf'
+        'zz-p16-keyboard.conf'
+        'nvidia.conf'
+        'omarchy-n1x-nvidiafb.conf'
+        'p16-touchpad.quirks'
+        '00-omarchy-n1x-gpu.conf'
+        '00-omarchy-n1x-sleep.conf'
+        '00-omarchy-n1x-usb4.conf'
+        'limine-p16-keyboard.conf'
+        'zz-p16-clean-menu.conf'
+        'p16-platform.modules'
+        'p16-charge-limit.tmpfiles'
+        '99-p16-battery.rules'
+        'p16-charge-limit.service'
+        '20-p16-asus.conf'
+        '00-p16-guard-preflight.hook'
+        'zz-p16-boot-menu.hook'
+        '95-p16-platform-update-check.hook'
+        '90-mkinitcpio-install.hook'
+        'p16-mkinitcpio-managed'
+        'p16-guard-preflight'
+        'p16-boot-menu-policy'
+        'install-mkinitcpio-guard.sh'
+        'p16-platform-update-check'
+        'p16-temperatures'
+        'MIT.txt')
+sha256sums=('8ec062e0a9367a54b987c63822b40d1bc07406c23364420e811a28826b205bb5'
+            'f9c0241f143d5767dc54dfaa132499e4ec8e2a8bcfb85fa51ebdeb53e37ee7ff'
+            '1eedbb84066fe765903cd17abfce0aa3519139f66946e22490a98b64122d94bb'
+            'e1ee2400583db9ea4f6fefcdff61bc6166135fd4526c3082e83f3d15daaa5b11'
+            '36f790b2f9a49cc52e25e4d59eb664fdacacdbaf6af33e398a4faef2450667f1'
+            '52eefa8921d17b19469458315c9a3957f71dc8a51e71f2ae8af3057d24988e02'
+            '39d595392cc0f5979164aad23cbbf3058ec371dd3f16e0f796255d04f183b345'
+            '90f23727f7c0e057fc1fb7b76f6dac5ad7ffd59a25a3f2486c47b717c000b304'
+            'd2ae26037d9d8407e12cb2432bc4c655231884c38a5fccd1cd1d7390502cdfad'
+            '12f73c2cba15be03e6d201aef7a47eea74a4f13025f8898337e1dca6cad43e19'
+            '497c10607eee04ee9a8835da1110856d2ea77fc2129c50884d1016fb7e15084d'
+            'f3f9ad24682cb2f31a03a7a1e264246a2904abbc19e5e36f63adbe3e25724d3f'
+            '6b3079679643fae1947490299e85a0a1b160e7f134ff2906fb24fdb9956f834c'
+            'c73c8a0a516a3fcdb251b25dbb57c59ea9b57d830b5eb81e93291c782eb01b77'
+            'ac8951311ef9d9851b450a0f55da4fbbe3a00cae67ef8188a63f1dc5b7b2bbf4'
+            '99d023cfee748ce927dc676b313299f1e5e5e1abbeda60e323efd3818915f6f5'
+            '3a6c236864474bdf6f2a0296f722c7affb6e604471e2d7a977f279de65c401f8'
+            'cf39e8dba0a7197a4aeae7ccdb8c99f1f1b0910972d3df8291f6ac4eb886a30f'
+            '2a85465225591e0a302de2db5f282ec71cc10191a611a6ff90232883390822ee'
+            'd39955672849a06087632067fb2f984f06e1b0303c241d950e209237eb901b26'
+            'b305a4aaa1c5600510b4d862834fcde30039957db525ca87ac50897cc49bc3ad'
+            '7bdf417186aca06d9ad8f96cda876af13ed3a3873b3481490853cc72ef6780ca'
+            '84a2623fdd591f77c6587b1d76409dd4fed3dd33bc04cf720511d746409c7982'
+            'eb5dc38390cf9d6830c0af860dc0260ff8d654afcc4644482925363a7946b0d0'
+            'd394bbae18bb7d5c02d3c6f23177fea7899b8cc47473c4d7b44ace3f32622e27'
+            '65a186d74cfdab0880bb855ad96c41b05d81635acdb78d022d710b7396807786'
+            '9d326dc959d45aa56cedcfb87470dbb38e11a46c56cb92cc030c075bfed5a557'
+            '213e4f92de2bfb95c95fc90aa94a5378e92a7c3bdf1d2b22768da3fa9068b3b3')
+backup=('etc/mkinitcpio.conf.d/zz-p16-hardware-fixes.conf'
+        'etc/mkinitcpio.conf.d/zz-p16-input.conf'
+        'etc/mkinitcpio.conf.d/zz-p16-keyboard.conf'
+        'etc/modprobe.d/nvidia.conf'
+        'etc/modprobe.d/omarchy-n1x-nvidiafb.conf'
+        'etc/limine-entry-tool.d/00-omarchy-n1x-gpu.conf'
+        'etc/limine-entry-tool.d/00-omarchy-n1x-sleep.conf'
+        'etc/limine-entry-tool.d/00-omarchy-n1x-usb4.conf'
+        'etc/limine-entry-tool.d/zz-p16-keyboard.conf'
+        'etc/limine-entry-tool.d/zz-p16-clean-menu.conf')
+
+package() {
+  install -Dm755 "$srcdir/p16-acpi" "$pkgdir/usr/lib/initcpio/install/p16-acpi"
+  install -Dm644 "$srcdir/zz-p16-hardware-fixes.conf" "$pkgdir/etc/mkinitcpio.conf.d/zz-p16-hardware-fixes.conf"
+  install -Dm644 "$srcdir/zz-p16-input.conf" "$pkgdir/etc/mkinitcpio.conf.d/zz-p16-input.conf"
+  install -Dm644 "$srcdir/zz-p16-keyboard.conf" "$pkgdir/etc/mkinitcpio.conf.d/zz-p16-keyboard.conf"
+  install -Dm644 "$srcdir/nvidia.conf" "$pkgdir/etc/modprobe.d/nvidia.conf"
+  install -Dm644 "$srcdir/omarchy-n1x-nvidiafb.conf" "$pkgdir/etc/modprobe.d/omarchy-n1x-nvidiafb.conf"
+  install -Dm644 "$srcdir/p16-touchpad.quirks" "$pkgdir/usr/share/libinput/99-p16.quirks"
+  install -Dm644 "$srcdir/00-omarchy-n1x-gpu.conf" "$pkgdir/etc/limine-entry-tool.d/00-omarchy-n1x-gpu.conf"
+  install -Dm644 "$srcdir/00-omarchy-n1x-sleep.conf" "$pkgdir/etc/limine-entry-tool.d/00-omarchy-n1x-sleep.conf"
+  install -Dm644 "$srcdir/00-omarchy-n1x-usb4.conf" "$pkgdir/etc/limine-entry-tool.d/00-omarchy-n1x-usb4.conf"
+  install -Dm644 "$srcdir/limine-p16-keyboard.conf" "$pkgdir/etc/limine-entry-tool.d/zz-p16-keyboard.conf"
+  install -Dm644 "$srcdir/zz-p16-clean-menu.conf" "$pkgdir/etc/limine-entry-tool.d/zz-p16-clean-menu.conf"
+  install -Dm644 "$srcdir/p16-platform.modules" "$pkgdir/usr/lib/modules-load.d/p16-platform.conf"
+  install -Dm644 "$srcdir/p16-charge-limit.tmpfiles" "$pkgdir/usr/lib/tmpfiles.d/p16-charge-limit.conf"
+  install -Dm644 "$srcdir/99-p16-battery.rules" "$pkgdir/usr/lib/udev/rules.d/99-p16-battery.rules"
+  install -Dm644 "$srcdir/p16-charge-limit.service" "$pkgdir/usr/lib/systemd/system/p16-charge-limit.service"
+  install -Dm644 "$srcdir/20-p16-asus.conf" "$pkgdir/usr/lib/systemd/system/power-profiles-daemon.service.d/20-p16-asus.conf"
+  install -Dm644 "$srcdir/00-p16-guard-preflight.hook" "$pkgdir/usr/share/libalpm/hooks/00-p16-guard-preflight.hook"
+  install -Dm644 "$srcdir/zz-p16-boot-menu.hook" "$pkgdir/usr/share/libalpm/hooks/zz-p16-boot-menu.hook"
+  install -Dm644 "$srcdir/95-p16-platform-update-check.hook" "$pkgdir/usr/share/libalpm/hooks/95-p16-platform-update-check.hook"
+  install -Dm644 "$srcdir/90-mkinitcpio-install.hook" "$pkgdir/usr/share/p16-platform/90-mkinitcpio-install.hook"
+  install -Dm755 "$srcdir/p16-mkinitcpio-managed" "$pkgdir/usr/lib/p16-platform/mkinitcpio"
+  install -Dm755 "$srcdir/p16-guard-preflight" "$pkgdir/usr/lib/p16-platform/preflight"
+  install -Dm755 "$srcdir/p16-boot-menu-policy" "$pkgdir/usr/lib/p16-platform/boot-menu"
+  install -Dm755 "$srcdir/install-mkinitcpio-guard.sh" "$pkgdir/usr/lib/p16-platform/install-guard"
+  install -Dm755 "$srcdir/p16-platform-update-check" "$pkgdir/usr/bin/p16-platform-update-check"
+  install -Dm755 "$srcdir/p16-temperatures" "$pkgdir/usr/bin/p16-temperatures"
+  install -Dm644 "$srcdir/MIT.txt" "$pkgdir/usr/share/licenses/p16-platform-policy/LICENSE"
+}

@@ -2,14 +2,12 @@
 """Read ROT1 status and explicitly query PFI or PCBI capabilities."""
 import argparse
 import ctypes
-import errno
 import fcntl
 import json
 import os
 import struct
 
 PCBI_SUCCESS = 0x7986ACBD
-PCBI_SERVICE_QUERY = 1
 PCBI_ENUMERATE_SERVICES = 5
 PCBI_ENUMERATE_VERSIONS = 7
 PCBI_DEVICE_INFO = 4
@@ -17,15 +15,12 @@ PCBI_REPLY_CAPACITY = 1024
 PCBI_DEVICE_INFO_CAPACITY = 4096
 
 
-def query_request(command):
-    if command not in (PCBI_DEVICE_INFO, PCBI_ENUMERATE_SERVICES, PCBI_ENUMERATE_VERSIONS):
-        raise ValueError('unsupported PCBI query')
-    return struct.pack('<BBHBBHI', 1, PCBI_SERVICE_QUERY, 0, 1, 1, 0, command)
-
-
 def query_capacity(command):
-    query_request(command)
-    return PCBI_DEVICE_INFO_CAPACITY if command == PCBI_DEVICE_INFO else PCBI_REPLY_CAPACITY
+    if command == PCBI_DEVICE_INFO:
+        return PCBI_DEVICE_INFO_CAPACITY
+    if command in (PCBI_ENUMERATE_SERVICES, PCBI_ENUMERATE_VERSIONS):
+        return PCBI_REPLY_CAPACITY
+    raise ValueError('unsupported PCBI query')
 
 
 def decode_device_info(body):
@@ -79,35 +74,13 @@ def decode_query(reply, command):
             for index in range(count)]
 
 
-def legacy_query_ioctl(fd, command):
-    request = query_request(command)
-    capacity = query_capacity(command)
-    tx = ctypes.create_string_buffer(request, len(request))
-    rx = ctypes.create_string_buffer(capacity)
-    exchange = bytearray(struct.pack('<4I2Q2I', PCBI_SERVICE_QUERY, len(request),
-                                    capacity, 0, ctypes.addressof(tx),
-                                    ctypes.addressof(rx), 0, 0))
-    fcntl.ioctl(fd, (3 << 30) | (len(exchange) << 16) | (ord('P') << 8) | 2,
-                exchange, True)
-    channel, tx_size, rx_size, actual, tx_ptr, rx_ptr, status, reserved = \
-        struct.unpack('<4I2Q2I', exchange)
-    if status or reserved or actual > capacity:
-        raise ValueError('invalid PFI exchange result')
-    return decode_query(rx.raw[:actual], command)
-
-
 def query_ioctl(fd, command):
     capacity = query_capacity(command)
     rx = ctypes.create_string_buffer(capacity)
     pointer = ctypes.addressof(rx)
     query = bytearray(struct.pack('<4IQ2I', command, capacity, 0, 0, pointer, 0, 0))
-    try:
-        fcntl.ioctl(fd, (3 << 30) | (len(query) << 16) | (ord('P') << 8) | 3,
-                    query, True)
-    except OSError as error:
-        if error.errno != errno.ENOTTY:
-            raise
-        return legacy_query_ioctl(fd, command)
+    fcntl.ioctl(fd, (3 << 30) | (len(query) << 16) | (ord('P') << 8) | 3,
+                query, True)
     echoed, rx_size, actual, result, rx_ptr, reserved1, reserved2 = \
         struct.unpack('<4IQ2I', query)
     if (echoed != command or rx_size != capacity or rx_ptr != pointer or

@@ -2,10 +2,9 @@
 """Prepare and verify P16 touchpad policy and OEM speaker tuning.
 
 Firmware is downloaded and extracted, never executed or redistributed.
-Live writes are allowed only inside the kernel installer's backup transaction.
+Installed files are owned by the platform policy and firmware packages.
 """
 import argparse
-import configparser
 import hashlib
 import json
 import os
@@ -16,7 +15,7 @@ import tempfile
 import urllib.request
 
 REPO = Path(__file__).resolve().parents[1]
-QUIRKS = '/etc/libinput/local-overrides.quirks'
+QUIRKS = '/usr/share/libinput/99-p16.quirks'
 INITCPIO = '/etc/mkinitcpio.conf.d/zz-p16-speakers.conf'
 FIRMWARE_DIR = '/usr/lib/firmware/cirrus'
 FIRMWARE_NAMES = (
@@ -24,7 +23,6 @@ FIRMWARE_NAMES = (
     'cs35l56-b0-dsp1-misc-10431484-spkid0-l1u0.bin',
     'cs35l56-b0-dsp1-misc-10431484-spkid0-l1u1.bin',
 )
-PATHS = [QUIRKS, INITCPIO] + [f'{FIRMWARE_DIR}/{name}' for name in FIRMWARE_NAMES]
 
 
 def require(condition, message):
@@ -86,67 +84,6 @@ def prepare(directory):
     print(f'Verified {len(outputs)} firmware files in {directory}')
 
 
-def touchpad_text(current):
-    """Preserve other quirks and accept an already installed equivalent match."""
-    desired = (REPO / 'config/p16-touchpad.quirks').read_text()
-    parser = configparser.ConfigParser(interpolation=None)
-    parser.read_string(current)
-    expected = configparser.ConfigParser(interpolation=None)
-    expected.read_string(desired)
-    section = expected.sections()[0]
-    values = dict(expected[section])
-    found = False
-    for name in parser.sections():
-        existing = dict(parser[name])
-        if existing == values:
-            found = True
-            continue
-        # Do not silently stack a competing P16 pressure policy.
-        if name == section or (existing.get('matchvendor', '').lower() == '0x093a'
-                              and existing.get('matchproduct', '').lower() == '0x4f01'):
-            raise ValueError('Existing P16 touchpad policy differs; reconcile it before installation: ' + name)
-    if found:
-        return current
-    return current + ('\n' if current.endswith('\n') else '\n\n' if current else '') + desired
-
-
-def plan(directory, root=Path('/')):
-    """Validate every input and destination before returning any live writes."""
-    files = {}
-    files[INITCPIO] = (REPO / 'config/zz-p16-speakers.conf').read_bytes()
-    for row in manifest()['files']:
-        files[f"{FIRMWARE_DIR}/{row['name']}"] = verify((directory / row['name']).read_bytes(), row)
-    quirks = root / QUIRKS.lstrip('/')
-    require(not quirks.is_symlink(), 'Refusing a symlink touchpad configuration')
-    current = quirks.read_text() if quirks.exists() else ''
-    files[QUIRKS] = touchpad_text(current).encode()
-    changes = {}
-    for name, content in files.items():
-        target = root / name.lstrip('/')
-        require(not target.is_symlink(), 'Refusing a symlink destination: ' + name)
-        if target.exists():
-            old = target.read_bytes()
-            if name != QUIRKS:
-                require(old == content, 'Existing peripheral file differs; refusing overwrite: ' + name)
-            if old == content:
-                continue
-        changes[name] = content
-    return changes
-
-
-def apply(directory, backup):
-    import install_state
-    require(os.geteuid() == 0, 'Run through sudo scripts/install-kernel.sh')
-    check_machine()
-    state = install_state.load(install_state.trusted_backup(backup))
-    require(state['status'] == 'running' and set(PATHS).issubset(state['files']),
-            'A running installer checkpoint covering all peripheral files is required')
-    for name, content in plan(directory).items():
-        path = Path(name)
-        mode = path.stat().st_mode & 0o777 if path.exists() else 0o644
-        atomic_write(path, content, mode)
-
-
 def check_machine():
     require(platform.machine() == 'aarch64', 'AArch64 required')
     for key, expected in {'sys_vendor': 'ASUS', 'product_name': 'ProArt P16 H7607BA',
@@ -160,7 +97,8 @@ def check_installed():
     for row in manifest()['files']:
         verify((Path(FIRMWARE_DIR) / row['name']).read_bytes(), row)
     current = Path(QUIRKS).read_text()
-    require(touchpad_text(current) == current, 'P16 touchpad quirk is missing')
+    require(current == (REPO / 'config/p16-touchpad.quirks').read_text(),
+            'Packaged touchpad quirk differs from the maintained configuration')
     print('P16 touchpad policy and all three speaker firmware hashes match.')
     initcpio = Path(INITCPIO)
     if not initcpio.exists() or initcpio.read_bytes() != (REPO / 'config/zz-p16-speakers.conf').read_bytes():
@@ -170,23 +108,15 @@ def check_installed():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['prepare', 'check-inputs', 'check-installed', 'apply'])
+    parser.add_argument('action', choices=['prepare', 'check-installed'])
     parser.add_argument('--directory', type=Path, default=REPO / 'build/speaker-firmware')
-    parser.add_argument('--backup', type=Path)
     args = parser.parse_args()
     try:
         if args.action == 'prepare':
             prepare(args.directory)
-        elif args.action == 'check-inputs':
-            check_machine()
-            changes = plan(args.directory)
-            print(f'Peripheral inputs verified; {len(changes)} file(s) need installation.')
-        elif args.action == 'check-installed':
-            check_installed()
         else:
-            require(args.backup is not None, '--backup is required')
-            apply(args.directory, args.backup)
-    except (OSError, ValueError, configparser.Error, subprocess.SubprocessError) as error:
+            check_installed()
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
         parser.exit(1, str(error) + '\n')
 
 

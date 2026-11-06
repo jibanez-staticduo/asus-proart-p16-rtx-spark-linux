@@ -46,7 +46,7 @@ struct mutex {pthread_mutex_t native;};struct file {void *private_data;};
 #define PTR_ERR(p) ((long)(intptr_t)(p))
 static unsigned long jiffies=123;
 static unsigned long msecs_to_jiffies(unsigned long n) {return n;}
-static bool enable_transport,enable_raw_exchange;
+static bool enable_transport;
 ''' + constants + state + r'''
 static struct n1x_pluton device;
 static u32 registers[64];
@@ -71,9 +71,6 @@ static bool access_ok(const void *p,size_t n) {return p && n && !fail_access;}
 static void *kvzalloc(size_t n,int flags)
 {assert(!flags && !locked);if(fail_alloc)return NULL;void *p=calloc(1,n);assert(p);allocations++;return p;}
 static void kvfree(void *p) {if(p){assert(allocations);allocations--;free(p);}}
-static void kfree(void *p) {kvfree(p);}
-static void *memdup_user(const void *p,size_t n)
-{void *copy=kvzalloc(n,0);if(!copy)return (void *)(intptr_t)-ENOMEM;memcpy(copy,p,n);return copy;}
 static u32 ioread32(const void *p) {assert(locked);return *(const u32 *)p;}
 static void iowrite32(u32 value,void *p) {assert(locked);writes++;*(u32 *)p=value;}
 static int n1x_rot_flush(struct n1x_pluton *p,unsigned int status,unsigned int ack)
@@ -85,7 +82,7 @@ static void put32(u8 *p,u32 n) {for(unsigned i=0;i<4;i++)p[i]=n>>(8*i);}
 static int n1x_pfi_channels(struct n1x_pluton *p,struct n1x_pluton_channels *channels,
  unsigned long deadline)
 {assert(p==&device && locked && deadline==jiffies+10000);memset(channels,0,sizeof(*channels));return 0;}
-static int n1x_pluton_rpc(struct n1x_pluton *p,struct n1x_pluton_exchange *exchange,
+static int n1x_pluton_rpc(struct n1x_pluton *p,struct n1x_pluton_transfer *exchange,
  const u8 *tx,u8 *rx,unsigned long deadline)
 {
  assert(p==&device && locked && deadline==jiffies+10000);
@@ -120,7 +117,7 @@ static void reset(void)
  assert(!locked && !allocations && !active_rpc);
  device.last_pfi_status=0;device.initialized=true;
  device.poisoned=device.removed=device.suspended=false;
- enable_transport=true;enable_raw_exchange=false;
+ enable_transport=true;
  calls=max_rpc=writes=0;flush_error=wait_error=0;
  fail_from=fail_descriptor=fail_payload=fail_access=fail_alloc=raw_cap=false;
  lock_error=rpc_error=reply_fault=0;
@@ -188,9 +185,8 @@ int main(void)
   if(!stage)assert(!ret && calls==1 && device.initialized && !device.poisoned);
   else assert(ret==(stage==1?-EBUSY:stage==2?-ETIMEDOUT:-EIO) && !calls && device.poisoned);
  }
- reset();raw_cap=true;assert(n1x_pluton_ioctl(&file,N1X_PLUTON_EXCHANGE,0)==-EOPNOTSUPP);
- enable_raw_exchange=true;raw_cap=false;
- assert(n1x_pluton_ioctl(&file,N1X_PLUTON_EXCHANGE,0)==-EPERM);
+ reset();raw_cap=true;assert(n1x_pluton_ioctl(&file,0xc0285002U,0)==-ENOTTY);
+ raw_cap=false;assert(n1x_pluton_ioctl(&file,0xc0285002U,0)==-ENOTTY);
  assert(n1x_pluton_ioctl(&file,0,0)==-ENOTTY && !calls && !writes);
  reset();pthread_t threads[8];
  for(unsigned i=0;i<8;i++)assert(!pthread_create(&threads[i],NULL,thread_query,(void *)(uintptr_t)commands[i%3]));

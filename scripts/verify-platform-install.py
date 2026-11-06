@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
-"""Audit installed P16 platform drivers and perform bounded existing queries.
+"""Audit installed platform drivers using bounded firmware queries.
 
-No DSP firmware boot, driver replacement, EFI or calibration-variable writes.
-The optional service-start flag starts the already-enabled NPU service.
-The explicit SCP-refresh flag replaces only the known older logging build;
-it refuses a failed/poisoned mailbox and never resets platform firmware.
-Use --after-boot-id to require evidence from a different boot.
+Writes only the requested report. Use --after-boot-id to require a new boot.
 """
 import argparse
 from datetime import datetime, timezone
@@ -37,34 +33,10 @@ def run(args, timeout=30):
     return result.stdout
 
 
-def refresh_scp(report, modules=Path("/sys/module"), debug=Path("/sys/kernel/debug/n1x_scp")):
-    loaded = (modules / "n1x_scp/srcversion").read_text().strip()
-    installed = run(["modinfo", "-F", "srcversion", "n1x_scp"]).strip()
-    report["scp_refresh"] = {"before": loaded, "installed": installed, "reloaded": False}
-    if loaded == installed:
-        return
-    if (loaded, installed) != ("DDC3B43D4121E886E058EF7", "D952AC3E19ADB9131CCA01F"):
-        raise RuntimeError("Unknown SCP build transition; no reload attempted")
-    if (modules / "n1x_scp/refcnt").read_text().strip() != "0" or \
-            "mailbox_queries=enabled" not in (debug / "status").read_text().splitlines():
-        raise RuntimeError("SCP is busy or its mailbox failed; no reload attempted")
-    if "/updates/dkms/" not in run(["modinfo", "-n", "n1x_scp"]).strip():
-        raise RuntimeError("Expected installed SCP DKMS build")
-    run(["rmmod", "n1x_scp"])
-    # The SCP module's removal only releases debugfs/MMIO mappings. The
-    # platform-owned firmware keeps running; SPI HID has no consumer link.
-    run(["modprobe", "n1x_scp"])
-    if (modules / "n1x_scp/srcversion").read_text().strip() != installed:
-        raise RuntimeError("SCP refresh did not load the installed build")
-    report["scp_refresh"]["reloaded"] = True
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--after-boot-id")
-    parser.add_argument("--start-npu-service", action="store_true")
-    parser.add_argument("--refresh-scp", action="store_true")
     args = parser.parse_args()
     if os.geteuid():
         parser.error("Run as root via sudo or pkexec")
@@ -75,7 +47,7 @@ def main():
         parser.error("The requested reboot has not happened; no reboot verification claimed")
     live = load("audit_live", "validate-platform-live.py")
     provider = load("audit_provider", "validate-sroot-provider.py")
-    late = load("audit_late", "install-scp.py")
+    late = load("audit_late", "boot_audit.py")
     verify = load("audit_boot", "verify-boot.py")
     firmware = load("audit_firmware", "prepare-dsp-firmware.py")
     live.check_target()
@@ -89,12 +61,8 @@ def main():
     try:
         report["packages"] = run(["pacman", "-Q", *PACKAGES]).splitlines()
         report["dkms"] = run(["dkms", "status"], timeout=120)
-        service = "n1x-platform-npu.service" if Path("/usr/lib/systemd/system/n1x-platform-npu.service").exists() else "n1x-npu.service"
+        service = "n1x-platform-npu.service"
         report["npu_service_name"] = service
-        if args.start_npu_service:
-            run(["systemctl", "start", service], timeout=60)
-        if args.refresh_scp:
-            refresh_scp(report)
         report["npu_service"] = run(["systemctl", "show", service,
                                      "-p", "ActiveState", "-p", "Result", "-p", "ConditionResult"])
         if "ActiveState=active" not in report["npu_service"] or "Result=success" not in report["npu_service"]:
@@ -109,8 +77,8 @@ def main():
             installed = run(["modinfo", "-n", name]).strip()
             built = run(["modinfo", "-F", "srcversion", name]).strip()
             loaded = (path / "srcversion").read_text().strip()
-            if loaded != built or "/updates/dkms/" not in installed:
-                raise RuntimeError("Loaded/installed DKMS module differs: " + name)
+            if loaded != built:
+                raise RuntimeError("Loaded/installed module differs: " + name)
             report["module_versions"][name] = {"path": installed, "srcversion": loaded}
         report["scp_version"] = Path("/sys/kernel/debug/n1x_scp/firmware_version").read_text().strip()
         report["pluton"] = json.loads(run(["n1x-pluton-info", "--discover", "--versions", "--services", "--device-info"],

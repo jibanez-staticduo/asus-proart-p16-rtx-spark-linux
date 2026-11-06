@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+obj-$(CONFIG_N1X_ADSP) += dsp/
+obj-$(CONFIG_N1X_SCP) += scp/
+obj-$(CONFIG_N1X_PLUTON) += pluton/
+obj-$(CONFIG_N1X_PROTOCOL_KUNIT_TEST) += tests/

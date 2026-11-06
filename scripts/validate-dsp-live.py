@@ -126,7 +126,7 @@ def main():
     if args.report.exists():
         parser.error("Report already exists; choose a new path")
     live = load_script("platform_live", "validate-platform-live.py")
-    installer = load_script("late_installer", "install-scp.py")
+    installer = load_script("late_installer", "boot_audit.py")
     live.check_target()
     report = {"captured_at": datetime.now(timezone.utc).isoformat(), "before": snapshot(),
               "dsp_firmware_started": False, "npu_module_replaced": False}

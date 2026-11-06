@@ -1,4 +1,5 @@
 build/
+kernel/src
 kernel/src/
 kernel/pkg/
 kernel/*.pkg.tar.*

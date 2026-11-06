@@ -31,3 +31,31 @@ the hardware or firmware ABI and remain part of the implementation.
 These changes do not establish hardware qualification on other computers.
 Published DSP memory still requires a verified quiesce/shutdown contract before
 release. No running module is replaced by preparing or testing these sources.
+
+## Build integration
+
+For an external build of DSP, SCP and Pluton:
+
+```sh
+make -C platform KDIR=/path/to/kernel/build W=1 -j2
+```
+
+For in-tree integration, place this directory under `drivers/platform/n1x`,
+source `drivers/platform/n1x/Kconfig` from `drivers/platform/Kconfig`, and add
+`obj-y += n1x/` to `drivers/platform/Makefile`. Select `CONFIG_N1X_ADSP`,
+`CONFIG_N1X_SCP` and `CONFIG_N1X_PLUTON` as needed. The source still requires the
+matching MediaTek power, AFE and SROOT interfaces described by each driver.
+Leaf Kbuilds also support their DKMS packages directly.
+
+Native protocol tests require no hardware. From the integrated Linux tree:
+
+```sh
+python3 tools/testing/kunit/kunit.py run --arch=arm64 \
+  --kunitconfig=drivers/platform/n1x/tests/.kunitconfig \
+  n1x-platform-protocol
+```
+
+Install QEMU's ARM64 system emulator to execute that configuration. The suite
+checks DSP IPC, PCM descriptors, PCBI replies and signed firmware envelopes.
+It complements the actual-function fault/concurrency harnesses in this
+repository; it does not boot platform firmware or qualify hardware.

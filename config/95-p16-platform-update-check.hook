@@ -11,4 +11,4 @@ Target = usr/lib/firmware/nvidia/n1x/*
 [Action]
 Description = Checking P16 kernel capabilities, DKMS modules and embedded sensor transport...
 When = PostTransaction
-Exec = /usr/local/sbin/p16-platform-update-check --all
+Exec = /usr/bin/p16-platform-update-check --all

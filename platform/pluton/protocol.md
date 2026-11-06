@@ -96,12 +96,10 @@ are returned directly. User-copy failures return `EFAULT`; a fault can occur
 after a query completed, so callers must not treat it as proof that no request
 was sent. The driver does not resubmit failed queries automatically.
 
-The CLI uses this ioctl and falls back to the legacy raw-exchange interface
-only on `ENOTTY`, to support older driver versions. Other errors do not trigger
-a second request. Raw exchange now requires both `enable_raw_exchange=1` and
-`CAP_SYS_RAWIO`; the parameter defaults to false and is read-only after load.
-The existing `enable_transport` parameter still gates all firmware transactions.
-Probe does not submit PCBI queries. No query command updates firmware or keys.
+The CLI submits each typed query once and propagates errors. Command number 2
+is reserved and returns `ENOTTY`; no raw userspace exchange is exposed.
+The `enable_transport` parameter gates firmware transactions. Probe sends no
+PCBI queries. The supported commands do not update firmware or keys.
 
 The NVIDIA host API handles command 3 differently: at `0x1800325e8`,
 `Pcbi1Query1ColdLoadDeviceInfo_PlutonFx_Usermode` synthesizes platform metadata
@@ -117,16 +115,10 @@ truncations, unmatched fields, count/length failures, remote errors and ioctl
 buffer bounds. `protocol_test.c` validates the same kernel reply parser under
 ASan/UBSan. `test_query.py` compiles the driver's actual ioctl and initialization
 functions with mocked OS/RPC edges, exercising preflight rejection, terminal
-states, reply and user-copy failures, raw-exchange gates and eight concurrent
+states, reply and user-copy failures, rejection of reserved ioctls and eight concurrent
 query callers. These are offline tests; live query results are recorded
 separately. Other PCBI services, including key operations and firmware control,
 are not implemented or exercised by this client.
-
-On November 6 the P16 command-4 query returned platform ID 6 and one package
-whose eight name bytes encode `PltnFull`, type 1 and flags 6. The transport was
-healthy before and after the request; there were no new kernel messages or
-boot-artifact changes. The result, loaded-module version and client hash are
-recorded in `n1x-lab/results/platform-enablement-20261106/pluton-package-info-query.json`.
 
 `plutonhsprot.sys` and its symbols are also pinned as comparison inputs. Its
 source paths identify an AMD ROT backend, so its mailbox implementation is

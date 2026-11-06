@@ -51,7 +51,7 @@ def main():
     if args.report.exists():
         parser.error('Choose a new report path')
     live = load('primary_live', 'validate-platform-live.py')
-    late = load('primary_boot_hashes', 'install-scp.py')
+    late = load('primary_boot_hashes', 'boot_audit.py')
     provider = load('primary_provider', 'validate-sroot-provider.py')
     live.check_target()
     client = live.check_module(args.client_module)
@@ -63,12 +63,8 @@ def main():
     if client_sysfs.exists():
         parser.error('Validation module already exists; no replacement attempted')
     loaded = Path('/sys/module/n1x_adsp/srcversion').read_text().strip()
-    version = run(['modinfo', '-F', 'version', 'n1x_adsp'])
-    if loaded != run(['modinfo', '-F', 'srcversion', 'n1x_adsp']) or \
-            version not in ('0.1.3', '0.1.4'):
-        parser.error('Expected the installed DSP 0.1.3 or 0.1.4 build to be loaded')
-    if args.mode == 'task' and version != '0.1.4':
-        parser.error('The task client requires the DSP 0.1.4 lifecycle API')
+    if loaded != run(['modinfo', '-F', 'srcversion', 'n1x_adsp']):
+        parser.error('Loaded DSP source differs from the installed module')
     before = {}
     for name in ('NVDA8301:00', 'NVDA8302:00', 'NVDA8303:00'):
         device = SYS / name

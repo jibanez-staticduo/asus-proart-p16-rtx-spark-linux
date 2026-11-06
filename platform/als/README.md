@@ -38,12 +38,6 @@ scales, devices with only color channels, missing fields and invalid scan
 indices. A runtime qualification must also check the exposed IIO scales and
 real samples. Correct descriptor units do not establish optical calibration.
 
-The November 6, 2026 P16 trial verified the four scales above and all five raw
-channels. One set converted to 143 lux, 4431 K and chromaticity X/Y of
-0.3761/0.3747. No new kernel messages appeared and all boot hashes stayed
-unchanged. The result is recorded in
-`n1x-lab/results/platform-enablement-20261106/als-upstream-trial.json`.
-
 The DKMS package replaces only `hid_sensor_als`. It uses the existing sensor
 hub, trigger, power management and SPI transport. Installation must first
 verify that this module is absent from all managed initramfs images; it must
