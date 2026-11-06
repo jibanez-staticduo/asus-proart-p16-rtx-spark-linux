@@ -1,6 +1,6 @@
 # Experimental MT8901 DSP boot
 
-The uninstalled `0.1.13-1` candidate implements the P16 route-2 playback
+The uninstalled `0.1.14-1` candidate implements the P16 route-2 playback
 configuration chain: host task 7 and processing task 16. Processing IPC uses
 two AFE-owned 1 KiB SRAM slices, registered with commands 5 and 6 before OPEN.
 HWPARAM configures the task-7 host ring, task-16 hardware ring and task-16
@@ -106,6 +106,21 @@ not advertise pause, resume or no-period-wakeup support. Restart, additional
 endpoints and complete-stream hardware qualification remain open. The path
 is not installed or enabled on this machine.
 
+Version 0.1.14 requires SROOT client ABI v2 before taking power or publishing
+DSP memory. The provider releases the temporary signed-image allocation only
+after a completed upload with canonical reply header `0x18`, no reply payload,
+and zero remote status/detail. The provider's published DSP lease, module and
+runtime-PM references remain held independently of that allocation. NPU shutdown
+still returns `EBUSY` for such a lease. ABI v1 retains its earlier staging-buffer
+policy, and no old published instance can be converted or retried.
+
+The DSP client validates all v2 result fields, including `staging_released`,
+before waiting for ready. A firmware-ready notification cannot override an
+invalid loader result. Status reports `loader_staging_released` separately.
+Rejected, malformed or uncertain uploads retain staging and poison the shared
+loader. This candidate has offline fault, concurrency and shutdown-guard tests;
+the new release path has no hardware qualification.
+
 This module reuses MediaTek's existing SSPM power-management path and adds a
 gated secure-loader and boot-ready experiment for the P16's two HiFi5 cores
 and HiFi1 core. Audio routing, streaming and general compute services are
@@ -139,8 +154,9 @@ explicit boot request to fail before power, DMA allocation or MMIO writes.
 HiFi5-1 also requires HiFi5-0 readiness before attempting publication.
 
 Before the first DRAM config write, the module holds runtime PM and module
-references. Once published, DSP DRAM and the provider's firmware DMA buffer
-are retained until reboot, including after timeout/rejection. There is no
+references. Once published, DSP DRAM and the provider's DSP lifetime lease
+are retained until reboot. ABI v2 can release a successfully consumed image
+buffer; uncertain/rejected uploads retain that buffer as well. There is no
 automatic retry, guessed reset or unload. Published instances refuse system
 sleep. This lifetime policy must be replaced by a verified DSP shutdown
 protocol before enabling normal desktop operation with firmware boot.

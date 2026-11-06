@@ -575,8 +575,39 @@ a validated completed upload from uncertain submission/completion and retain
 uncertain allocations. Releasing a successfully consumed image buffer also
 does not establish that DSP operating memory can be released or that another
 core may be powered down. The current broker and DSP driver still retain both
-classes of published allocations until their respective release contracts
-are implemented and qualified.
+classes of published allocations in the installed version. The v2 candidate
+below separates consumed image staging from the retained DSP lifetime lease.
+
+Candidate `0.1.14` uses `n1x_sroot_upload_dsp_v2()`. The provider shares v1's
+boot mutex, image pins and one-attempt policy, and retains its module/runtime-PM
+reference before publication. It releases the temporary image buffer only when
+the serialized exchange completes with command `0x18`, raw reply header exactly
+`0x18`, zero payload words, and zero status/detail. It then clears the CPU/DMA
+addresses and reports `staging_released`. The published lease flag stays set;
+NPU shutdown still checks it before changing hardware or lifetime state.
+
+Every rejected, malformed or uncertain exchange retains staging and poisons
+the shared loader. A later v1/v2 call cannot retry or retire an old allocation.
+ABI v1 retains its original behavior. The DSP client requires v2 before taking
+power or publishing operating memory, and rejects inconsistent success fields
+even if a ready notification has arrived. No operating DSP DRAM or AFE SRAM,
+provider lease, module reference or runtime-PM vote is released by this API.
+
+`scripts/analyze-dsp-shutdown.py` checks both pinned PE hashes and extracts the
+allocation/copy/exchange/free call order, the DMA free-table slot and the PEP
+GET constants. Its receipt is
+`n1x-lab/results/platform-enablement-20261106/dsp-shutdown-staging-analysis/report.json`.
+The PEP's three query words still have no verified DMA-off interpretation.
+No GET or power-off request was sent as part of this work.
+
+The provider's actual-function sanitizer harness covers every prepublication
+and exchange failure, noncanonical replies, all three successful images,
+v1/v2 interoperation and eight concurrent same-image callers. Shutdown tests
+explicitly retain the `EBUSY` guard when a published lease has no remaining
+staging allocation. DSP boot tests reject every inconsistent v2 success flag
+without freeing published operating memory. These are offline checks; staging
+release still requires fresh-boot hardware qualification, and whole-core
+shutdown/DMA release remains unfinished.
 
 ## Linux AFE hardware-ring preparation
 

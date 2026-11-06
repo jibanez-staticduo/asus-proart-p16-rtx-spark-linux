@@ -35,12 +35,17 @@
   },
   "shared_loader": {
     "owner": "n1x_npu_bootstrap / NVDA8600",
-    "kernel_api": "n1x_sroot_upload_dsp_v1",
+    "kernel_api": "n1x_sroot_upload_dsp_v2",
     "header": "n1x_sroot_client.h",
     "implementation": "../../../n1x-lab/npu/driver/n1x_npu_boot_linux.c",
     "serialized_with_npu_boot": true,
     "pinned_images_only": true,
-    "uncertain_completion_policy": "poison shared loader and retain DMA/PM/module references until reboot"
+    "uncertain_completion_policy": "poison shared loader and retain DMA/PM/module references until reboot",
+    "provider_lifetime": "Published lease and PM/module references retained independently of staging",
+    "successful_staging_release": "Only completed exchange with canonical empty raw reply header 0x18 and zero remote status/detail",
+    "legacy_v1_unchanged": true,
+    "operating_memory_or_provider_lease_release_implemented": false,
+    "hardware_release_validated": false
   },
   "scope": {
     "auto_boot": false,
@@ -520,5 +525,23 @@
       "Restart after STOP and additional frontends",
       "Verified whole-core quiesce, DMA/SROOT lease release and suspend/resume"
     ]
+  },
+  "loader_staging_release": {
+    "version": "0.1.14",
+    "client_api": "n1x_sroot_upload_dsp_v2",
+    "provider_package": "n1x-sroot-provider-dkms 0.1.0-6",
+    "analysis_script": "scripts/analyze-dsp-shutdown.py",
+    "analysis": "n1x-lab/results/platform-enablement-20261106/dsp-shutdown-staging-analysis/report.json",
+    "native_loader_sha256": "f814e861b5e076aa4e00619a8a588df3c4ae9ec2b5026c30748ba493ce0e6d8a",
+    "native_upload": "0x140031c98",
+    "native_cleanup": "0x140003e00",
+    "dma_operations_free_offset": "0x18",
+    "canonical_reply": "raw header 0x18, command 0x18, count/status/detail zero",
+    "error_policy": "Retain staging and poison the shared loader after malformed, rejected or uncertain submission",
+    "provider_shutdown_guard": "Published DSP lease remains set even with cpu=NULL and dma=0; NPU shutdown returns EBUSY before changing hardware",
+    "dsp_preflight": "Require v2 symbol before power/DRAM publication; validate all returned success fields before waiting for ready",
+    "installed": false,
+    "hardware_validated": false,
+    "whole_core_release_verified": false
   }
 }

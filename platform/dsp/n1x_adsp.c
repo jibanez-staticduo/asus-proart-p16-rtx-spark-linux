@@ -115,7 +115,7 @@ struct n1x_adsp {
 	int primary_period_error;
 	void (*primary_period)(void *data, const struct n1x_adsp_pcm_position *position, int error);
 	void *primary_period_data;
-	struct n1x_sroot_client_result loader;
+	struct n1x_sroot_client_result_v2 loader;
 	struct work_struct power_work;
 	spinlock_t power_lock;
 	DECLARE_KFIFO(power_requests, u32, 16);
@@ -392,7 +392,7 @@ static irqreturn_t n1x_adsp_irq(int irq, void *data)
 
 static int n1x_adsp_boot(struct n1x_adsp *dsp)
 {
-	typeof(n1x_sroot_upload_dsp_v1) *upload;
+	typeof(n1x_sroot_upload_dsp_v2) *upload;
 	const struct firmware *firmware;
 	u8 digest[SHA256_DIGEST_SIZE], expected[SHA256_DIGEST_SIZE];
 	u64 end;
@@ -425,7 +425,7 @@ static int n1x_adsp_boot(struct n1x_adsp *dsp)
 			return -EHOSTDOWN;
 	}
 	/* Resolve the serialized loader before taking power or publishing DMA. */
-	upload = symbol_get(n1x_sroot_upload_dsp_v1);
+	upload = symbol_get(n1x_sroot_upload_dsp_v2);
 	if (!upload)
 		return -EOPNOTSUPP;
 	err = request_firmware_direct(&firmware, dsp->target->firmware, dsp->dev);
@@ -488,6 +488,10 @@ static int n1x_adsp_boot(struct n1x_adsp *dsp)
 	writel(lower_32_bits(dsp->dma), dsp->shared + ADSP_CONFIG_OFFSET);
 	writel(dsp->target->dram_bytes, dsp->shared + ADSP_CONFIG_OFFSET + 8);
 	err = upload(dsp->target->image_id, firmware->data, firmware->size, &dsp->loader);
+	if (!err && (!dsp->loader.published || !dsp->loader.reply_valid ||
+		     !dsp->loader.accepted || !dsp->loader.staging_released ||
+		     dsp->loader.reply_header != 0x18))
+		err = -EPROTO;
 	if (!err && !wait_for_completion_timeout(&dsp->ready, msecs_to_jiffies(30000)))
 		err = -ETIMEDOUT;
 	dsp->error = err;
@@ -504,7 +508,7 @@ put_pm:
 release:
 	release_firmware(firmware);
 put_symbol:
-	symbol_put(n1x_sroot_upload_dsp_v1);
+	symbol_put(n1x_sroot_upload_dsp_v2);
 	return err;
 }
 
@@ -662,9 +666,9 @@ static ssize_t status_show(struct device *dev, struct device_attribute *attribut
 	write_counter = dsp->primary_write_counter;
 	spin_unlock_irqrestore(&dsp->ipc_lock, flags);
 	bytes = sysfs_emit(buffer,
-		"image=%#x attempted=%u published=%u loader_published=%u loader_accepted=%u ready=%u error=%d notifications=%u last_command=%#x power_queued=%d power_completed=%d power_error=%d ipc_token=%u ipc_pending=%u ipc_error=%d primary_attempted=%u primary_ready=%u primary_completed=%u primary_error=%d primary_task_active=%u primary_task_error=%d primary_client=%u primary_pcm_attempted=%u primary_pcm_configured=%u primary_pcm_error=%d primary_sram_retained=%u primary_pcm_prepared=%u processing_active=%u processing_messages_retained=%u pcm_notifications=%llu pcm_offset=%u pcm_counter=%u pcm_period_error=%d pcm_write_offset=%u pcm_next_write_counter=%u pcm_write_publications=%llu pcm_start_attempted=%u pcm_running=%u pcm_stopped=%u services=0\n",
+		"image=%#x attempted=%u published=%u loader_published=%u loader_accepted=%u loader_staging_released=%u ready=%u error=%d notifications=%u last_command=%#x power_queued=%d power_completed=%d power_error=%d ipc_token=%u ipc_pending=%u ipc_error=%d primary_attempted=%u primary_ready=%u primary_completed=%u primary_error=%d primary_task_active=%u primary_task_error=%d primary_client=%u primary_pcm_attempted=%u primary_pcm_configured=%u primary_pcm_error=%d primary_sram_retained=%u primary_pcm_prepared=%u processing_active=%u processing_messages_retained=%u pcm_notifications=%llu pcm_offset=%u pcm_counter=%u pcm_period_error=%d pcm_write_offset=%u pcm_next_write_counter=%u pcm_write_publications=%llu pcm_start_attempted=%u pcm_running=%u pcm_stopped=%u services=0\n",
 		dsp->target->image_id, dsp->attempted, dsp->published, dsp->loader.published,
-		dsp->loader.accepted, dsp->boot_ready, dsp->error,
+		dsp->loader.accepted, dsp->loader.staging_released, dsp->boot_ready, dsp->error,
 		dsp->notifications, dsp->last_command,
 		atomic_read(&dsp->power_queued), atomic_read(&dsp->power_completed),
 		atomic_read(&dsp->power_error), dsp->ipc_token,
@@ -1794,4 +1798,4 @@ EXPORT_SYMBOL_GPL(n1x_adsp_primary_abi);
 module_platform_driver(n1x_adsp_driver);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Experimental P16 MT8901 DSP boot, IPC and playback services");
-MODULE_VERSION("0.1.13");
+MODULE_VERSION("0.1.14");

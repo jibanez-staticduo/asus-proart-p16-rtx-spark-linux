@@ -15,7 +15,18 @@ checks and the remaining submission blockers for each locally maintained driver.
 | SCP | Firmware version, sensor descriptors and firmware log; the VEML3328 measurement client uses SPI HID and the existing HID ALS IIO driver | No second mailbox IIO device is needed for the same physical sensor; additional firmware clients require their own protocol and device evidence |
 | Pluton | ROT1/PFI transport and typed kernel-validated protocol/service/package queries, installed and hardware-verified on November 6; raw exchange disabled by default | Control-service lifecycle and upstream API review |
 | NPU/SROOT | Native-DSDT automatic startup with the November 5 fixes and eight exact numerical outputs verified on November 6; shared DSP upload and checked shutdown tested on earlier boots | New shared-DSP release and lifecycle support depends on the unfinished DSP shutdown contract |
-| MT8901 DSP | Three signed images accepted and ready on November 6; four primary-task message buffers registered; OPEN/HWFREE/CLOSE acknowledged; one queued SSPM power request completed; uninstalled 0.1.13 adds typed START/STOP, AFE SRAM ownership and an optional DL0 ALSA frontend with producer/pointer/queued-period integration | Complete-stream hardware qualification, restart and additional audio/compute endpoints, verified shutdown/DMA release, suspend/resume, and automatic startup qualification |
+| MT8901 DSP | Three signed images accepted and ready on November 6; four primary-task message buffers registered; OPEN/HWFREE/CLOSE acknowledged; one queued SSPM power request completed; uninstalled 0.1.14 adds typed transitions, optional DL0 ALSA frontend and checked release of consumed loader staging | Staging-release and complete-stream hardware qualification, restart/additional endpoints, verified core shutdown and operating-memory/provider-lease release, suspend/resume and automatic startup qualification |
+
+The uninstalled DSP `0.1.14-1` and provider `0.1.0-6` candidates separate
+temporary loader staging from the retained DSP/provider lifetime lease. Only
+the canonical successful `0x18` reply releases staging; uncertain/rejected
+uploads retain it. NPU shutdown still refuses a published DSP lease even with
+no staging allocation. All 136 platform tests, NPU `make check`, five DSP and
+five NPU warning-free builds pass; both source archives and all eight local
+recipe hashes were checked. The AFE sources remain unchanged from 0.1.13.
+Receipts are in `build/dsp-staging-v2-20261106/report.json`. No new firmware
+or power request was sent and no running module was replaced. Hardware release
+qualification and whole-core shutdown/reclamation remain open.
 
 The `0.1.13-1` DSP candidate passes all 136 platform tests and five warning-free
 `W=1` builds each for DSP and AFE. The generated AFE patch matches its canonical

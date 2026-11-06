@@ -1,5 +1,5 @@
 pkgname=n1x-adsp-dkms
-pkgver=0.1.13
+pkgver=0.1.14
 pkgrel=1
 pkgdesc='Experimental P16 MT8901 DSP secure-boot driver; firmware boot disabled'
 arch=('aarch64')
@@ -14,19 +14,19 @@ source=('n1x_adsp.c' 'n1x_sroot_client.h' 'Kbuild' 'dkms.conf'
         'n1x_adsp_ipc.h' 'n1x_adsp_client.h' 'test_transport.py' 'ipc_test.c' 'protocol.md'
         'test_primary.py' 'test_lifecycle.py' 'n1x_adsp_pcm.h' 'pcm_test.c'
         'mt8901-afe-sram.h' 'test_pcm_service.py' 'test_period.py' 'test_producer.py' 'test_trigger.py')
-sha256sums=('59ac02728e161bcc4029052fc6fd15adb3abd1131a6f22727e7189f08d92032d'
-            '97a563951b1d981b3a14f525f7bad0eaf33fe485a1f9352beb30af95148960f9'
+sha256sums=('7c33be6468a71f8d8f22b39b0a4403506e93fe8cb7834d7b1690f3719bf6a86f'
+            '361cf0c72e36455922cee6b342aadd298f9682ba9c2956cadcd3fcb9741e6658'
             '230086b8afc95aea40727de3a89c05228cd79b78854e8973eefb06b65d740c02'
-            'f295be39f25536a520d2b771ca8551ca98e12591cb5eda7740db8309dd40f334'
+            'c64c45b5911b804afd266d2a36238e45ae227059f4bb2799e87dbb9cb8649977'
             '8beebbc715402c0bbea8120cbc29f2c601ade0c89589403d8aef6cc88cb56e36'
-            'b6f4c4cf0ce0ac29ad4d964ece5805cc43caa44b93f18458c0864f85962a1838'
-            'e342969f1f7de4b2be005514ac6828929ca1cdb34201466095d7efae8cc69f50'
-            'a003f32195720bbce44dc65ffa0f1f151c5cfacbf5cdf55b7b4dceb6632f3ff8'
+            '73ef7bfa335c1c59e8b7ed2ccb232ab5ae3fc95ae7c288d5d3c6e72d6b099664'
+            'e504b42cb93793339f5f3d2108574a4136a57d930175a4bea737ed758407c9ce'
+            'd26ffed68ec1c0a323ac102495231ec980700354851febecdc69da6c387914f8'
             '065f50cda1705bba540aed2ca8888d6c9c2e67052484139454396c85bbb12b67'
             '8730bf8c955826279f848a0577984534fcb2edc20b4afeaffdfa9fc599a67a9a'
             'e9aa0dcc0da19dd325a05c645cc3e7cbf4889bfdbd585ab3e84f5ec60afb7eed'
             '4179280ce67720d36b3eb23b86159a3bac59a26e855c717f5cf7ec6081478b7a'
-            '45c04027cd5f9b3c73e3ae60e2307ba47dca8efc155d77c17b34e92b2cc39729'
+            'e54a8478095bc2eea4eb3fa87fbd9d2acbfe742f3fa1984fdce97d64d1762fbd'
             '3cd8df0ee7fc187701e95b7bc64cfbf0dcbb90ac91ecb0272875c863942ff97b'
             'bf9f936e7c9fbbb3467be4f241227e815f84e7d272c60507578230814aa9fdd6'
             '7f696a92fbe1cd1d45922b158a9ffd32ae89cde5c4c6578abd68a4f431ee541c'

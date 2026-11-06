@@ -173,7 +173,7 @@ static void reinit_completion(struct completion *c) {assert(!c->done);c->done=fa
 static unsigned long wait_for_completion_timeout(struct completion *c,unsigned long ticks) {
  assert(ticks==30000);waits++;return c->done?1:0;
 }
-static int upload_stub(u32 id,const u8 *image,size_t bytes,struct n1x_sroot_client_result *result);
+static int upload_stub(u32 id,const u8 *image,size_t bytes,struct n1x_sroot_client_result_v2 *result);
 static int power_calls,power_reply,in_irq;
 static u32 power_value,power_values[16];
 static int mtk_send_power_control_req(struct _power_cntrl_request *request)
@@ -186,7 +186,7 @@ static int mtk_send_power_control_req(struct _power_cntrl_request *request)
  power_value=data->customdata[1];return power_reply;
 }
 static u32 get_unaligned_le32(const u8 *p) {return (u32)p[0]|(u32)p[1]<<8|(u32)p[2]<<16|(u32)p[3]<<24;}
-static typeof(n1x_sroot_upload_dsp_v1) *get_provider(void) {if(!provider)return NULL;symbol_refs++;return upload_stub;}
+static typeof(n1x_sroot_upload_dsp_v2) *get_provider(void) {if(!provider)return NULL;symbol_refs++;return upload_stub;}
 static void put_provider(void) {assert(symbol_refs==1);symbol_refs--;}
 #define symbol_get(name) get_provider()
 #define symbol_put(name) put_provider()
@@ -194,11 +194,13 @@ static void put_provider(void) {assert(symbol_refs==1);symbol_refs--;}
 static struct n1x_adsp dsp;
 ''' + source[source.index('static void n1x_adsp_ipc_fail('):
              source.index('static bool n1x_adsp_tx_idle(')] + handlers + r'''
-static int upload_stub(u32 id,const u8 *image,size_t bytes,struct n1x_sroot_client_result *result) {
+static int upload_stub(u32 id,const u8 *image,size_t bytes,struct n1x_sroot_client_result_v2 *result) {
  assert(id==0xc0304 && image==firmware.data && bytes==firmware.size);
  assert(module_refs==1 && pm_refs==1 && symbol_refs==1 && dsp.published && dsp.attempted && writes==2);
  assert(shared_memory[ADSP_CONFIG_OFFSET/4]==0xe0000000 && shared_memory[ADSP_CONFIG_OFFSET/4+2]==24U<<20);
- uploads++;result->published=1;if(fault==10)return -ETIMEDOUT;result->accepted=1;
+ uploads++;result->published=1;if(fault==10)return -ETIMEDOUT;result->accepted=1;result->reply_valid=1;result->reply_header=0x18;result->staging_released=1;
+ if(fault==13)result->published=0;if(fault==14)result->reply_valid=0;if(fault==15)result->accepted=0;
+ if(fault==16)result->staging_released=0;if(fault==17)result->reply_header=0x118;
  if(fault!=11) {
   u8 *packet=(u8 *)shared_memory+ADSP_RX_OFFSET;
   packet[19]=fault==12?0:0x20;packet[22]=2;packet[23]=0xf0;
@@ -233,7 +235,7 @@ static void period_callback(void *data,const struct n1x_adsp_pcm_position *posit
  period_calls++;period_error=error;
 }
 int main(void) {
- for(int f=1;f<=12;f++) {
+ for(int f=1;f<=17;f++) {
   reset();fault=f;
   if(f==7)mailbox_memory[ADSP_OUT_STATUS/4]=1;
   if(f==8){shared_memory[ADSP_CONFIG_OFFSET/4]=0xe0000000;shared_memory[ADSP_CONFIG_OFFSET/4+2]=24U<<20;}
@@ -241,7 +243,8 @@ int main(void) {
   if(f<10)assert(!writes && !pm_refs && !module_refs && !dsp.published && !allocation && !uploads);
   else {
    assert(dsp.published && dsp.attempted && pm_refs==1 && module_refs==1 && allocation && !frees && uploads==1);
-   assert(!dsp.boot_ready && n1x_adsp_boot(&dsp)==-EALREADY);
+   if(f<=12)assert(!dsp.boot_ready);else assert(dsp.boot_ready && dsp.error==-EPROTO && !waits);
+   assert(n1x_adsp_boot(&dsp)==-EALREADY);
   }
  }
  reset();assert(!n1x_adsp_boot(&dsp));assert(dsp.boot_ready && dsp.loader.accepted && dsp.notifications==1);

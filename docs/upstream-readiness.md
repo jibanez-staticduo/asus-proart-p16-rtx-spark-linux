@@ -6,7 +6,34 @@ The current sources are suitable for continued local development. The complete
 driver set is not ready for Linux upstream submission. The table identifies
 the independently reviewable changes and the remaining blockers.
 
-## Current candidate: DSP 0.1.13
+## Current candidate: DSP 0.1.14 and SROOT provider 0.1.0-6
+
+The uninstalled candidates add loader ABI v2. Only a completed canonical
+empty `0x18` reply permits release of the temporary image staging allocation.
+The provider's published DSP lease and module/runtime-PM references remain
+held independently of that allocation. NPU shutdown still returns `EBUSY`
+before hardware changes, including when no staging CPU/DMA address remains.
+Malformed, rejected or uncertain exchanges retain staging and poison the
+shared loader. ABI v1 retains its previous behavior. DSP boot requires v2
+before power/DRAM publication and checks every success field before waiting
+for ready.
+
+All 136 platform tests, NPU `make check`, five warning-free DSP builds and five
+warning-free NPU/provider builds pass. The AFE's eleven output files and patch
+are unchanged from the qualified 0.1.13 receipt below. All eight local recipes'
+source hashes match. Both package archives pass independent source-byte,
+inventory, ownership and mode checks. Changed kernel sources pass checkpatch
+with SPDX dependencies available. The current report is
+`build/dsp-staging-v2-20261106/report.json`.
+
+The pinned loader analysis identifies the temporary common-buffer free path;
+it does not establish DSP core quiescence. The PEP GET words still have no
+verified DMA-off interpretation. No new GET, power-off or firmware request was
+sent, and live DSP/NPU modules remain unchanged. Staging release needs a
+fresh-boot hardware trial. Core power-off, operating DRAM/AFE SRAM and provider
+lease release remain unfinished, as do streaming/restart and subsystem review.
+
+## Prior candidate: DSP 0.1.13
 
 The uninstalled `0.1.13-1` candidate adds an optional DL0 playback client to
 the existing AFE/SoundWire frontend. It checks primary-client ABI 1, copies
@@ -210,7 +237,7 @@ DSP and NPU instances were preserved.
 | SCP | Firmware log and bounded queries, with firmware ABI matching; measurements use the existing HID ALS IIO client | Local diagnostic driver. Review the debugfs snapshot/query interface, BIOS-specific matching and subsystem placement before preparing a series. |
 | Pluton | Serialized ROT1/PFI transport and typed PCBI capability/running-firmware queries with kernel reply validation; raw exchange requires explicit opt-in | Query interface qualified locally. Target subsystem/API review remains; query-service integration does not implement the control service. |
 | NPU/SROOT | DRM accelerator frontend, protocol guards and checked shutdown; portable tests and previous numerical workloads pass | Requires an in-tree series with Kconfig, Makefile and maintainer integration, reviewed firmware/DMA dependencies and UAPI. The current trusted-loadable execution policy needs explicit security review. |
-| DSP | Three firmware boots, four primary-task buffer registrations, OPEN/HWFREE/CLOSE acknowledgements and one completed SSPM power request verified on hardware; uninstalled 0.1.13 adds the task graph, typed START/STOP, AFE ownership and an optional DL0 ALSA frontend with producer/pointer/queued-period integration | Incomplete. Complete-stream hardware qualification, restart, additional endpoints, verified shutdown/DMA release and suspend/resume remain missing. Published DSP state retains DMA, power and module references until reboot. |
+| DSP | Three firmware boots, four primary-task buffer registrations, OPEN/HWFREE/CLOSE acknowledgements and one completed SSPM power request verified on hardware; uninstalled 0.1.14 adds the task graph, typed transitions, optional DL0 ALSA frontend and checked release of consumed loader staging | Incomplete. Staging-release and complete-stream hardware qualification, restart, additional endpoints, core shutdown, operating-memory/provider-lease release and suspend/resume remain missing. Published operating memory, power and module references remain held. |
 | SPBM hwmon | Separately pinned `spark_hwmon` source at `ef94faace8a44380e8ba8c8bd8cffd185c82af67`; local telemetry and reduction-only controls previously tested | Not covered by the six-component build matrix. Source still contains discovery-history comments; its raw sysfs interfaces, board-specific mappings and remaining checkpatch diagnostics need review before submission. |
 
 The SPI HID base inspected for the existing drafts is HID `for-next` commit
