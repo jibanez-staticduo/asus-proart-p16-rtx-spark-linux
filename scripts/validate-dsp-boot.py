@@ -76,6 +76,39 @@ def any_published(snapshot):
     return any(item.get("status", {}).get("published") == "1" for item in snapshot.values())
 
 
+def check_loader_api(symbols):
+    if not re.search(r"^[0-9a-fA-F]+\s+[Tt]\s+n1x_sroot_upload_dsp_v2\s+"
+                     r"\[n1x_npu_bootstrap\]$", symbols, re.M):
+        raise RuntimeError("Loaded NPU module does not export the required loader ABI v2")
+
+
+def check_boot_result(item, image_id):
+    try:
+        actual_image = int(item.get("image", "0"), 0)
+    except ValueError as error:
+        raise RuntimeError("Malformed DSP image ID; no retry") from error
+    required = ("published", "loader_published", "loader_accepted",
+                "loader_staging_released", "ready")
+    if any(item.get(key) != "1" for key in required) or \
+            item.get("error") != "0" or item.get("power_error") != "0" or actual_image != image_id:
+        raise RuntimeError("DSP boot/ready and staging release not confirmed; no retry or reset")
+
+
+def check_trial_manifest(manifest, release, boot_id, provider_version, dsp_version, afe_version):
+    if manifest.get("kernel_release") != release:
+        raise RuntimeError("Qualification manifest does not match the running kernel")
+    source_boot = manifest.get("source_boot_id", "")
+    if not isinstance(source_boot, str) or not re.fullmatch(
+            r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", source_boot) or source_boot == boot_id:
+        raise RuntimeError("Qualification requires a fresh boot after preparing the bundle")
+    for name, current in (("provider", provider_version), ("dsp", dsp_version), ("afe", afe_version)):
+        expected = manifest.get("drivers", {}).get(name, {}).get("srcversion")
+        if not expected or expected != current:
+            raise RuntimeError("Qualification manifest source-version mismatch: " + name)
+    if manifest.get("loader_abi") != 2:
+        raise RuntimeError("Qualification manifest must require loader ABI v2")
+
+
 def prepare_domains(modes):
     for device, _, _ in TARGETS:
         path = SYS / device
@@ -97,6 +130,7 @@ def main():
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--module", type=Path, help="explicit reviewed candidate; defaults to installed DKMS module")
     parser.add_argument("--installed", action="store_true", help="use only installed provider and firmware artifacts")
+    parser.add_argument("--manifest", type=Path, help="pin the fresh kernel and DSP/provider/AFE source versions")
     args = parser.parse_args()
     if os.geteuid():
         parser.error("Run as root via sudo or pkexec")
@@ -115,9 +149,19 @@ def main():
             npu.get("status", {}).get("task_verified") != "1" or \
             npu.get("status", {}).get("queue_poisoned") != "0":
         parser.error("The tested shared-loader provider is not healthy and loaded")
-    if not re.search(r"\bn1x_sroot_upload_dsp_v1\s+\[n1x_npu_bootstrap\]", Path("/proc/kallsyms").read_text()):
-        parser.error("Loaded NPU module does not export the shared-loader API")
+    check_loader_api(Path("/proc/kallsyms").read_text())
     candidate = live.check_module(args.module or Path(run(["modinfo", "-n", "n1x_adsp"]).strip()))
+    manifest = None
+    if args.manifest:
+        manifest = json.loads(args.manifest.read_text())
+        afe_version = Path("/sys/module/snd_soc_mt8901_afe/srcversion").read_text().strip()
+        check_trial_manifest(manifest, os.uname().release,
+                             Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
+                             expected_provider, run(["modinfo", "-F", "srcversion", candidate]).strip(),
+                             afe_version)
+        expected_dsp = manifest["drivers"]["dsp"].get("sha256")
+        if expected_dsp != hashlib.sha256(candidate.read_bytes()).hexdigest():
+            parser.error("DSP candidate bytes differ from the qualification manifest")
     if Path("/sys/module/n1x_adsp").exists():
         parser.error("Native DSP instance already exists; no replacement or retry")
     probe.wait_suspended(probe.ORIGINAL)
@@ -139,7 +183,8 @@ def main():
     hashes, messages = late.boot_hashes(), live.kernel_messages()
     report = {"provider_srcversion": expected_provider, "before": state(),
               "candidate": str(candidate), "candidate_sha256": hashlib.sha256(candidate.read_bytes()).hexdigest(),
-              "automatic_boot_enabled": False, "boot_trials": {}, "firmware_sha256": pins}
+              "automatic_boot_enabled": False, "boot_trials": {}, "firmware_sha256": pins,
+              "loader_abi": 2, "qualification_manifest": manifest}
     created, modes = [], {}
     removed = inserted = published = False
     failure = None
@@ -167,10 +212,7 @@ def main():
             published = published or any_published(snapshot)
             item = snapshot[device]["status"]
             report["boot_trials"][device] = item
-            if any(item.get(key) != "1" for key in ("published", "loader_published", "loader_accepted", "ready")) or \
-                    item.get("error") != "0" or item.get("power_error", "0") != "0" or \
-                    int(item.get("image", "0"), 0) != image_id:
-                raise RuntimeError("DSP boot/ready not confirmed; no retry or reset")
+            check_boot_result(item, image_id)
             new_messages = live.new_kernel_messages(messages)
             live.check_kernel_messages(new_messages)
             if any(re.search(r"BUG:|Oops:|Kernel panic|Unhandled fault|translation fault", line, re.I) for line in new_messages):

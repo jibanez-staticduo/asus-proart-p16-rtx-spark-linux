@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""Stage and optionally build an isolated, signed-source P16 kernel candidate.
+
+Does not install packages, modify boot files or change running modules.
+"""
+import argparse
+from datetime import datetime, timezone
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import subprocess
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def save(path, value):
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(value, indent=2) + '\n')
+    temporary.replace(path)
+
+
+def process_start(pid):
+    try:
+        return Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()[19]
+    except FileNotFoundError:
+        return None
+
+
+def verify_inputs(output, manifest):
+    for name, digest in manifest['kernel_inputs'].items():
+        path = output / name
+        if not path.is_file() or path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            raise RuntimeError('Staged kernel input changed: ' + name)
+
+
+def prepare(output, release, jobs):
+    if output.exists():
+        raise RuntimeError('Output already exists; use --resume only after a terminal build')
+    names = subprocess.check_output(['git', 'ls-files', 'kernel'], cwd=ROOT, text=True).splitlines()
+    inputs = {}
+    for name in names:
+        path = ROOT / name
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError('Kernel input is not a regular file: ' + name)
+        inputs[name] = path.read_bytes()
+    output.mkdir(parents=True, mode=0o700)
+    for name, raw in inputs.items():
+        target = output / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(raw)
+    manifest = {
+        'created_at': now(),
+        'source_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
+        'local_kernel_inputs_pinned': True,
+        'kernel_inputs': {name: hashlib.sha256(raw).hexdigest() for name, raw in inputs.items()},
+        'pkgrel': release, 'jobs': jobs,
+        'expected_release': f'7.2.8-{release}-omarchy-p16-asus-npu',
+        'source_date_epoch': subprocess.check_output(['git', 'show', '-s', '--format=%ct', 'HEAD'],
+                                                      cwd=ROOT, text=True).strip(),
+        'packages_installed': False, 'boot_files_written': False,
+        'running_modules_changed': False, 'attempts': [],
+    }
+    save(output / 'manifest.json', manifest)
+    return manifest
+
+
+def build(output, manifest):
+    if os.geteuid() == 0:
+        raise RuntimeError('Build as the normal workspace owner, not root')
+    verify_inputs(output, manifest)
+    job_path = output / 'job.json'
+    if job_path.exists():
+        previous = json.loads(job_path.read_text())
+        if previous['status'] == 'complete':
+            raise RuntimeError('Candidate already built; use its verified packages or stage a new candidate')
+        if previous['status'] == 'running':
+            started = process_start(previous['pid'])
+            if started is not None and started == previous['process_start']:
+                raise RuntimeError('The recorded makepkg process is still live; do not restart it')
+    recipe = (output / 'kernel/PKGBUILD').read_text()
+    match = re.search(r'^makedepends=\((.*?)\)', recipe, re.M | re.S)
+    dependencies = shlex.split(match.group(1))
+    check = subprocess.run(['pacman', '-T', *dependencies], capture_output=True, text=True)
+    if check.returncode:
+        raise RuntimeError('Missing build dependencies; no packages installed: ' + check.stdout.strip())
+    env = os.environ.copy()
+    env.update({
+        'GNUPGHOME': str(output / 'gnupg'),
+        'PKGDEST': str(output / 'packages'),
+        'SRCDEST': str(output / 'kernel'),
+        'BUILDDIR': str(output / 'kernel'),
+        'P16_KERNEL_RELEASE': str(manifest['pkgrel']),
+        'MAKEFLAGS': '-j' + str(manifest['jobs']),
+        'SOURCE_DATE_EPOCH': manifest['source_date_epoch'],
+        'PKGEXT': '.pkg.tar.zst',
+    })
+    Path(env['GNUPGHOME']).mkdir(mode=0o700, exist_ok=True)
+    Path(env['PKGDEST']).mkdir(exist_ok=True)
+    keys = sorted((output / 'kernel/keys/pgp').glob('*.asc'))
+    subprocess.run(['gpg', '--batch', '--import', *map(str, keys)], env=env, check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    attempt = len(manifest['attempts']) + 1
+    log = output / f'build-{attempt}.log'
+    command = ['makepkg', '--force', '--noconfirm']
+    prepared = output / 'kernel/src/linux-7.2.8/version'
+    if attempt > 1 and prepared.is_file() and prepared.read_text().strip() == manifest['expected_release']:
+        command.append('--noextract')
+    else:
+        command.append('--cleanbuild')
+    with log.open('w') as stream:
+        process = subprocess.Popen(command, cwd=output / 'kernel', env=env,
+                                   stdout=stream, stderr=subprocess.STDOUT)
+        job = {'status': 'running', 'pid': process.pid, 'process_start': process_start(process.pid),
+               'started_at': now(), 'command': command, 'log': str(log),
+               'jobs': manifest['jobs'], 'pkgrel': manifest['pkgrel']}
+        save(job_path, job)
+        print(json.dumps(job), flush=True)
+        code = process.wait()
+    job.update({'status': 'complete' if code == 0 else 'failed',
+                'exit_code': code, 'finished_at': now()})
+    save(job_path, job)
+    manifest['attempts'].append(job)
+    verify_inputs(output, manifest)
+    if code == 0:
+        actual = (output / 'kernel/src/linux-7.2.8/version').read_text().strip()
+        if actual != manifest['expected_release']:
+            raise RuntimeError('Built release differs from the staged candidate: ' + actual)
+        manifest['packages'] = {
+            str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in sorted((output / 'packages').glob('*.pkg.tar.zst'))
+        }
+        if len(manifest['packages']) != 2:
+            raise RuntimeError('Expected exactly a kernel and matching headers package')
+    save(output / 'manifest.json', manifest)
+    print(json.dumps(job), flush=True)
+    if code:
+        raise RuntimeError('Kernel build failed; inspect ' + str(log))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--release', type=int, default=25)
+    parser.add_argument('--jobs', type=int, default=2)
+    parser.add_argument('--build', action='store_true')
+    parser.add_argument('--resume', action='store_true')
+    args = parser.parse_args()
+    if args.release < 25 or args.jobs < 1:
+        parser.error('Use a new release (25 or later) and a positive job limit')
+    output = args.output.absolute()
+    try:
+        if args.resume:
+            if not output.is_dir() or output.is_symlink():
+                raise RuntimeError('Resume requires the original candidate directory')
+            manifest = json.loads((output / 'manifest.json').read_text())
+        else:
+            manifest = prepare(output, args.release, args.jobs)
+        with (output / 'build.lock').open('a') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            verify_inputs(output, manifest)
+            if args.build:
+                build(output, manifest)
+        print(output / 'manifest.json')
+    except (OSError, RuntimeError, subprocess.CalledProcessError) as error:
+        parser.exit(1, str(error) + '\n')
+
+
+if __name__ == '__main__':
+    main()

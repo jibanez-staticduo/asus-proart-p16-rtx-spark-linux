@@ -1316,7 +1316,7 @@ prepare() {
 
 build() {
   cd $_srcname
-  MAKEFLAGS="-j$(nproc) $MAKEFLAGS"
+  MAKEFLAGS="${MAKEFLAGS:--j$(nproc)}"
   # N1x boots through ACPI. The Snapdragon laptops get no device tree from
   # their firmware, so build theirs and skip the other arm64 DTBs that
   # "make all" would build.

@@ -269,6 +269,52 @@ class ACPICapabilityTests(unittest.TestCase):
 
 
 class DSPBootTrialTests(unittest.TestCase):
+    def test_trial_requires_v2_from_the_shared_provider(self):
+        dsp_boot.check_loader_api('0000000000000000 T n1x_sroot_upload_dsp_v2 [n1x_npu_bootstrap]\n')
+        for symbols in (
+                '0000000000000000 T n1x_sroot_upload_dsp_v1 [n1x_npu_bootstrap]\n',
+                '0000000000000000 T n1x_sroot_upload_dsp_v2 [other_driver]\n',
+                '0000000000000000 T n1x_sroot_upload_dsp_v2\n',
+                '0000000000000000 T n1x_sroot_upload_dsp_v20 [n1x_npu_bootstrap]\n'):
+            with self.assertRaisesRegex(RuntimeError, 'loader ABI v2'):
+                dsp_boot.check_loader_api(symbols)
+
+    def test_ready_without_staging_release_cannot_qualify_boot(self):
+        valid = dict(image='0xc0303', published='1', loader_published='1', loader_accepted='1',
+                     loader_staging_released='1', ready='1', error='0', power_error='0')
+        dsp_boot.check_boot_result(valid, 0xc0303)
+        for name in valid:
+            missing = valid.copy()
+            del missing[name]
+            with self.assertRaises(RuntimeError):
+                dsp_boot.check_boot_result(missing, 0xc0303)
+            wrong = valid.copy()
+            wrong[name] = 'bad' if name == 'image' else ('0' if valid[name] == '1' else '1')
+            with self.assertRaises(RuntimeError):
+                dsp_boot.check_boot_result(wrong, 0xc0303)
+        with self.assertRaises(RuntimeError):
+            dsp_boot.check_boot_result(valid, 0xc0304)
+
+    def test_trial_manifest_requires_fresh_boot_and_matching_driver_set(self):
+        previous = 'db4397f4-646b-4b7d-9831-567db6218147'
+        fresh = '70000000-0000-4000-8000-000000000001'
+        release = '7.2.8-25-omarchy-p16-asus-npu'
+        manifest = dict(kernel_release=release, source_boot_id=previous, loader_abi=2,
+                        drivers={name: {'srcversion': value} for name, value in
+                                 (('provider', 'P'), ('dsp', 'D'), ('afe', 'A'))})
+        dsp_boot.check_trial_manifest(manifest, release, fresh, 'P', 'D', 'A')
+        for actual in ((release, previous, 'P', 'D', 'A'),
+                       ('other-kernel', fresh, 'P', 'D', 'A'),
+                       (release, fresh, 'wrong', 'D', 'A'),
+                       (release, fresh, 'P', 'wrong', 'A'),
+                       (release, fresh, 'P', 'D', 'wrong')):
+            with self.assertRaises(RuntimeError):
+                dsp_boot.check_trial_manifest(manifest, *actual)
+        for key, value in (('loader_abi', 1), ('source_boot_id', ''), ('source_boot_id', '-' * 36)):
+            invalid = manifest | {key: value}
+            with self.assertRaises(RuntimeError):
+                dsp_boot.check_trial_manifest(invalid, release, fresh, 'P', 'D', 'A')
+
     def test_firmware_publish_preserves_existing_and_conflicting_files(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "firmware.bin"
