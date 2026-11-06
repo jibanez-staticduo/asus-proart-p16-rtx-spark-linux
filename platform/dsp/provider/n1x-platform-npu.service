@@ -1,11 +1,11 @@
 [Unit]
-Description=Initialize the P16 NPU and shared SROOT provider
+Description=Initialize the NVIDIA N1X NPU and shared SROOT provider
 Documentation=https://github.com/johannhartmann/n1x-npu-linux
 After=systemd-modules-load.service sys-kernel-debug.mount
 Requires=sys-kernel-debug.mount
 Before=multi-user.target
-ConditionPathExists=/sys/bus/platform/devices/NVDA200A:00
-ConditionPathExists=/sys/bus/platform/devices/NVDA8600:00
+ConditionPathExistsGlob=/sys/bus/acpi/devices/NVDA200A:*
+ConditionPathExistsGlob=/sys/bus/acpi/devices/NVDA8600:*
 
 [Service]
 Type=oneshot

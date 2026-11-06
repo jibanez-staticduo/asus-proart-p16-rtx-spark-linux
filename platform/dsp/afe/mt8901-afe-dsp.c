@@ -15,7 +15,7 @@
 #include "../common/mtk-afe-platform-driver.h"
 
 /* The processing task also needs two independently retained 1 KiB IPC slices. */
-#define MT8901_DSP_RING_MAX (0x14000U - 2048U)
+#define MT8901_DSP_IPC_BYTES 2048U
 
 static bool dsp_playback;
 module_param(dsp_playback, bool, 0400);
@@ -157,6 +157,7 @@ int mt8901_afe_dsp_startup(struct snd_pcm_substream *substream, struct snd_soc_d
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	struct mt8901_afe_dsp *dsp;
 	struct device *dev;
+	size_t ring_max;
 	int ret;
 
 	if (!dsp_playback || dai->id != MT8901_AFE_MEMIF_DL0 ||
@@ -164,6 +165,11 @@ int mt8901_afe_dsp_startup(struct snd_pcm_substream *substream, struct snd_soc_d
 		return 0;
 	if (!substream->pcm->nonatomic || !priv->sram || priv->dsp)
 		return -EOPNOTSUPP;
+	ring_max = mt8901_afe_sram_size(afe);
+	if (ring_max <= MT8901_DSP_IPC_BYTES)
+		return -ENOSPC;
+	ring_max -= MT8901_DSP_IPC_BYTES;
+
 	dsp = kzalloc_obj(*dsp);
 	if (!dsp)
 		return -ENOMEM;
@@ -189,11 +195,11 @@ int mt8901_afe_dsp_startup(struct snd_pcm_substream *substream, struct snd_soc_d
 		goto free;
 	}
 	runtime->hw.channels_max = min(runtime->hw.channels_max, 2U);
-	runtime->hw.buffer_bytes_max = min(runtime->hw.buffer_bytes_max, MT8901_DSP_RING_MAX);
-	runtime->hw.period_bytes_max = min(runtime->hw.period_bytes_max, MT8901_DSP_RING_MAX / 2);
+	runtime->hw.buffer_bytes_max = min_t(unsigned int, runtime->hw.buffer_bytes_max, ring_max);
+	runtime->hw.period_bytes_max = min_t(unsigned int, runtime->hw.period_bytes_max, ring_max / 2);
 	runtime->hw.info &= ~(SNDRV_PCM_INFO_PAUSE | SNDRV_PCM_INFO_RESUME |
 			      SNDRV_PCM_INFO_NO_PERIOD_WAKEUP);
-	dev = bus_find_device_by_name(&platform_bus_type, NULL, "NVDA8303:00");
+	dev = n1x_adsp_find_device("NVDA8303");
 	if (!dev) {
 		ret = -ENODEV;
 		goto free;

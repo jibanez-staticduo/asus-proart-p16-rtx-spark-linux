@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include <linux/atomic.h>
-#include <linux/dmi.h>
 #include <linux/err.h>
 #include <linux/genalloc.h>
 #include <linux/io.h>
@@ -16,13 +15,12 @@
 #include "mt8901-reg.h"
 #include "../common/mtk-afe-fe-dai.h"
 
-#define MT8901_SRAM_BYTES 0x14000
 #define MT8901_SRAM_ALIGN 16
 
 struct mt8901_afe_sram {
 	struct gen_pool *pool;
 	void __iomem *base;
-	u32 cpu, vad, dsp;
+	u32 cpu, vad, dsp, bytes;
 	atomic_t users;
 	struct mt8901_afe_sram_buffer *memif[MT8901_AFE_MEMIF_NUM];
 };
@@ -51,14 +49,11 @@ static void mt8901_afe_sram_destroy(void *data)
 
 int mt8901_afe_sram_init(struct mtk_base_afe *afe)
 {
-	static const struct {
-		const char *name;
-		u32 expected;
-	} properties[] = {
-		{"acpi-asd-sram-size", MT8901_SRAM_BYTES},
-		{"acpi-asd-sram-cpu-view", 0x1a6c0000},
-		{"acpi-asd-sram-vad-view", 0x1a6c0000},
-		{"acpi-asd-sram-adsp-view", 0x4e5c0000},
+	static const char * const properties[] = {
+		"acpi-asd-sram-size",
+		"acpi-asd-sram-cpu-view",
+		"acpi-asd-sram-vad-view",
+		"acpi-asd-sram-adsp-view",
 	};
 	struct mt8901_afe_private *priv = afe->platform_priv;
 	struct device *dev = afe->dev;
@@ -70,8 +65,7 @@ int mt8901_afe_sram_init(struct mtk_base_afe *afe)
 	unsigned int i;
 	int ret;
 
-	if (!dmi_match(DMI_PRODUCT_NAME, "ProArt P16 H7607BA") ||
-	    !dmi_match(DMI_BIOS_VERSION, "H7607BA.300"))
+	if (!device_property_present(dev, "acpi-asd-sram-resource-list"))
 		return 0;
 	ret = device_property_read_u32(dev, "acpi-asd-hw-ver", &version);
 	if (ret)
@@ -85,17 +79,19 @@ int mt8901_afe_sram_init(struct mtk_base_afe *afe)
 	if (!node)
 		return -ENODEV;
 	for (i = 0; i < ARRAY_SIZE(properties); i++) {
-		ret = fwnode_property_read_u32(node, properties[i].name, &values[i]);
+		ret = fwnode_property_read_u32(node, properties[i], &values[i]);
 		if (ret)
 			break;
-		if (values[i] != properties[i].expected) {
-			ret = -ENODEV;
-			break;
-		}
 	}
 	fwnode_handle_put(node);
 	if (ret)
 		return ret;
+	if (!values[0] || !IS_ALIGNED(values[0], MT8901_SRAM_ALIGN))
+		return -EINVAL;
+	for (i = 1; i < ARRAY_SIZE(values); i++)
+		if (!values[i] || !IS_ALIGNED(values[i], MT8901_SRAM_ALIGN) ||
+		    values[0] - 1 > U32_MAX - values[i])
+			return -ERANGE;
 	group = devres_open_group(dev, NULL, GFP_KERNEL);
 	if (!group)
 		return -ENOMEM;
@@ -123,6 +119,7 @@ int mt8901_afe_sram_init(struct mtk_base_afe *afe)
 		goto release;
 	}
 	atomic_set(&sram->users, 0);
+	sram->bytes = values[0];
 	sram->cpu = values[1];
 	sram->vad = values[2];
 	sram->dsp = values[3];
@@ -135,6 +132,13 @@ int mt8901_afe_sram_init(struct mtk_base_afe *afe)
 release:
 	devres_release_group(dev, group);
 	return ret;
+}
+
+size_t mt8901_afe_sram_size(struct mtk_base_afe *afe)
+{
+	struct mt8901_afe_private *priv = afe->platform_priv;
+
+	return priv->sram ? priv->sram->bytes : 0;
 }
 
 bool mt8901_afe_sram_busy(struct mtk_base_afe *afe)
@@ -152,7 +156,7 @@ struct mt8901_afe_sram_buffer *mt8901_afe_sram_reserve(struct device *dev, size_
 	unsigned long address;
 	int ret;
 
-	if (!dev || !bytes || bytes > MT8901_SRAM_BYTES || !IS_ALIGNED(bytes, MT8901_SRAM_ALIGN))
+	if (!dev || !bytes || !IS_ALIGNED(bytes, MT8901_SRAM_ALIGN))
 		return ERR_PTR(-EINVAL);
 	buffer = kzalloc_obj(*buffer);
 	if (!buffer)
@@ -166,6 +170,10 @@ struct mt8901_afe_sram_buffer *mt8901_afe_sram_reserve(struct device *dev, size_
 	priv = afe->platform_priv;
 	if (!priv->sram) {
 		ret = -EOPNOTSUPP;
+		goto unlock;
+	}
+	if (bytes > priv->sram->bytes) {
+		ret = -EINVAL;
 		goto unlock;
 	}
 	if (!try_module_get(THIS_MODULE)) {

@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NPU = ROOT.parent / 'n1x-lab/npu'
 FILES = {
     'dsp': ('n1x_adsp.c', 'n1x_adsp_client.h', 'n1x_adsp_pcm.h', 'n1x_adsp_ipc.h',
-            'n1x_sroot_client.h', 'mt8901-afe-sram.h', 'Kbuild'),
+            'n1x_sroot_client.h', 'n1x_sroot_firmware.h', 'Kbuild'),
     'pluton': ('n1x_pluton.c', 'n1x_pluton_protocol.h', 'n1x_pluton_uapi.h',
                'n1x_pcbi_protocol.h', 'Kbuild'),
     'scp': ('n1x_scp.c', 'Kbuild'),
@@ -74,6 +74,8 @@ def stage(args):
     for kind, names in FILES.items():
         for name in names:
             copy_input(ROOT / 'platform' / kind / name, output / kind / name, inputs, output)
+    copy_input(ROOT / 'platform/dsp/afe/mt8901-afe-sram.h',
+               output / 'dsp/mt8901-afe-sram.h', inputs, output)
     receipt = json.loads((ROOT / 'platform/dsp/provider/receipt.json').read_text())
     for name, expected in receipt['snapshot']['files'].items():
         source = NPU / name
@@ -81,8 +83,12 @@ def stage(args):
             raise RuntimeError('Provider source differs from its package snapshot: ' + name)
         copy_input(source, output / 'provider' / name, inputs, output)
     hwmon = args.hwmon_source.resolve(strict=True)
-    if subprocess.check_output(['git', 'status', '--porcelain'], cwd=hwmon, text=True).strip():
-        raise RuntimeError('The hwmon source checkout has uncommitted changes')
+    hwmon_patch = ROOT / 'platform/hwmon/n1x-platform.patch'
+    actual_patch = subprocess.check_output(['git', 'diff', '--binary', 'HEAD'], cwd=hwmon)
+    if actual_patch != hwmon_patch.read_bytes():
+        raise RuntimeError('The hwmon source differs from its maintained platform patch')
+    if subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], cwd=hwmon).strip():
+        raise RuntimeError('The hwmon source contains untracked files')
     hwmon_head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=hwmon, text=True).strip()
     for name in ('spbm.c', 'n1x-mmio.h', 'n1x-acpi.h'):
         copy_input(hwmon / name, output / 'hwmon' / name, inputs, output)
@@ -106,7 +112,8 @@ def stage(args):
         'kernel_release': release,
         'source_boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
         'loader_abi': 2, 'jobs': args.jobs, 'inputs': inputs,
-        'hwmon_source_commit': hwmon_head, 'nvidia_version': loaded_version,
+        'hwmon_source_commit': hwmon_head, 'hwmon_patch_sha256': digest(hwmon_patch),
+        'nvidia_version': loaded_version,
         'source_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
         'npu_source_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=NPU, text=True).strip(),
         'installed': False, 'modules_loaded': False, 'boot_files_written': False,

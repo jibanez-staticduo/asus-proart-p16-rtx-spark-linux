@@ -1,7 +1,7 @@
 {
   "maintainer_base": "720806515cb6921ab05caaa6f470f7054b56385e",
   "prerequisite_head": "75cf8ad2bd218c25c0e949c5b5e270b7444266d8",
-  "review_head": "dac879fb60524fa8fdfd8d824e7260762ed27353",
+  "review_head": "c150ef72b56e9c6f5870657f57e75e0c8048aa72",
   "branch": "p16/spi-hid-review-20261106",
   "fixes_tags": "Local imported prerequisite IDs; remap before submission",
   "prerequisites": [
@@ -63,13 +63,14 @@
     }
   ],
   "patch_sha256": {
-    "0000-cover-letter.patch": "74bf72eb1bb629ddb6a833509b292aa6fd01d76be0504f84ee1889e8f8222748",
+    "0000-cover-letter.patch": "427b567cdc7343f65f48f3f97207b234312535e6f5c6cf1144a753848c53ec44",
     "0001-HID-spi-hid-retry-ACPI-GPIO-IRQ-lookup-at-probe.patch": "b338defdb3f14356eff1183282d94ec672df26bf21446859d0a57b56ebcd31d8",
     "0002-HID-spi-hid-evaluate-reset-on-the-ACPI-handle.patch": "d01189700a12826921d90feca692eae6a0e626533bfc52880919a757308e84d2",
     "0003-HID-spi-hid-serialize-and-type-GET-report-responses.patch": "a3c6e9919bb118165466446071a67c5e01c5b150cc0bf333a99fbbeeaf51ad22",
-    "0004-HID-spi-hid-handle-P16-stream-only-input-reports.patch": "53fa7c6d3347e77097083d7660cb79e02069767a8d9e572309d31144302e2480"
+    "0004-HID-spi-hid-handle-MSFW1111-stream-only-input-reports.patch": "5b6469af99fa22b61413b2e863fcb27fa8a34b1ffc6b7d9c017e8badda9c5723"
   },
   "hardware_target_kernel_booted": false,
   "submitted": false,
-  "human_dco_signoff": false
+  "human_dco_signoff": false,
+  "previous_review_head": "dac879fb60524fa8fdfd8d824e7260762ed27353"
 }

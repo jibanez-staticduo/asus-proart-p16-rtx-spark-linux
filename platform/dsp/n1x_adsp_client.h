@@ -9,6 +9,25 @@ struct device;
 struct n1x_adsp_primary;
 struct mt8901_afe_sram_buffer;
 
+#ifdef __KERNEL__
+#include <linux/acpi.h>
+#include <linux/platform_device.h>
+
+/* Returns a referenced platform device, independent of ACPI instance names. */
+static inline struct device *n1x_adsp_find_device(const char *hid)
+{
+	struct acpi_device *adev;
+	struct device *dev;
+
+	adev = acpi_dev_get_first_match_dev(hid, NULL, -1);
+	if (!adev)
+		return NULL;
+	dev = bus_find_device_by_acpi_dev(&platform_bus_type, adev);
+	acpi_dev_put(adev);
+	return dev;
+}
+#endif
+
 #define N1X_ADSP_PRIMARY_ABI 1U
 
 /* Query the typed playback client contract before opening a task. No firmware
@@ -42,7 +61,7 @@ int n1x_adsp_transfer(struct device *dev,
 		      struct n1x_adsp_ipc_reply *reply);
 
 /* Register the primary playback task's four message buffers on the core
- * selected by the speaker/headphone firmware properties (P16 route 2, HiFi1).
+ * selected by the speaker/headphone firmware properties (route 2, HiFi1).
  * Route 3 selects a different native task graph and is not implemented here.
  * Registered buffers
  * remain owned by the DSP boot allocation; this call does not open a stream.

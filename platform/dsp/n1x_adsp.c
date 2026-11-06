@@ -1,20 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-only
-/* P16 MT8901 secure boot and ready-notification driver.
+/* MT8901 secure boot, IPC and playback driver.
  * Power management adapted from MediaTek's sof/mt8901/mt8901.c:
  * Copyright (c) 2026 MediaTek Inc. (GPL-2.0-only OR BSD-3-Clause).
- * Audio streaming and compute endpoints are not implemented here.
  */
-#include <crypto/sha2.h>
 #include <linux/acpi.h>
 #include <linux/atomic.h>
 #include <linux/capability.h>
 #include <linux/completion.h>
 #include <linux/dma-map-ops.h>
 #include <linux/dma-mapping.h>
-#include <linux/dmi.h>
 #include <linux/err.h>
 #include <linux/firmware.h>
-#include <linux/hex.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
@@ -34,6 +30,7 @@
 #include "n1x_adsp_client.h"
 #include "mt8901-afe-sram.h"
 #include "n1x_sroot_client.h"
+#include "n1x_sroot_firmware.h"
 
 #define ADSP_RX_OFFSET 0x20
 #define ADSP_CONFIG_OFFSET 0x3a0
@@ -55,8 +52,8 @@ module_param(enable_boot, bool, 0400);
 MODULE_PARM_DESC(enable_boot, "Permit explicit one-shot secure boot; experimental, disabled by default");
 
 struct n1x_adsp_target {
-	const char *hid, *firmware, *sha256;
-	u32 image_id, config, shared_end, mailbox, dram_bytes, firmware_bytes;
+	const char *hid, *firmware;
+	u32 image_id, dram_bytes;
 };
 
 struct n1x_adsp_primary {
@@ -66,19 +63,17 @@ struct n1x_adsp_primary {
 
 static const struct n1x_adsp_target targets[] = {
 	{"NVDA8301", "nvidia/n1x/hifi5-0-mt8901-signed.bin",
-	 "350e0d40b2f8a6dfb486d8dfd3362fb5b02ceb90da372176b008498adbca8cc4",
-	 0xc0304, 0x1a000000, 0x1a160000, 0x1a350000, 24U << 20, 631436},
+	 0xc0304, 24U << 20},
 	{"NVDA8302", "nvidia/n1x/hifi5-1-mt8901-signed.bin",
-	 "517ef0d447ca80b7cb88ec0589cda816d9b20c844800ca95ccf7cbe96fc7d40e",
-	 0xc0305, 0x1a001000, 0x1a1a0000, 0x1a360000, 24U << 20, 157996},
+	 0xc0305, 24U << 20},
 	{"NVDA8303", "nvidia/n1x/hifi1-0-mt8901-signed.bin",
-	 "434660b36f4e21cb794bc50e10a47b91882710cbe90cb60620111a2a753c5b94",
-	 0xc0303, 0x1a400000, 0x1a5e0000, 0x1a750000, 16U << 20, 363816},
+	 0xc0303, 16U << 20},
 };
 
 struct n1x_adsp {
 	struct device *dev;
 	const struct n1x_adsp_target *target;
+	const char *firmware;
 	void *pwrap, *dram;
 	dma_addr_t dma;
 	void __iomem *shared, *mailbox;
@@ -394,7 +389,6 @@ static int n1x_adsp_boot(struct n1x_adsp *dsp)
 {
 	typeof(n1x_sroot_upload_dsp_v2) *upload;
 	const struct firmware *firmware;
-	u8 digest[SHA256_DIGEST_SIZE], expected[SHA256_DIGEST_SIZE];
 	u64 end;
 	u32 pending, previous_dma, previous_bytes;
 	int err;
@@ -407,8 +401,7 @@ static int n1x_adsp_boot(struct n1x_adsp *dsp)
 	 * primary core to complete boot first.
 	 */
 	if (dsp->target->image_id == 0xc0305) {
-		struct device *primary = bus_find_device_by_name(&platform_bus_type,
-							NULL, "NVDA8301:00");
+		struct device *primary = n1x_adsp_find_device("NVDA8301");
 		struct n1x_adsp *first = NULL;
 		bool ready;
 
@@ -428,19 +421,12 @@ static int n1x_adsp_boot(struct n1x_adsp *dsp)
 	upload = symbol_get(n1x_sroot_upload_dsp_v2);
 	if (!upload)
 		return -EOPNOTSUPP;
-	err = request_firmware_direct(&firmware, dsp->target->firmware, dsp->dev);
+	err = request_firmware_direct(&firmware, dsp->firmware, dsp->dev);
 	if (err)
 		goto put_symbol;
-	if (firmware->size != dsp->target->firmware_bytes) {
-		err = -EBADMSG;
+	err = n1x_sroot_validate_image(firmware->data, firmware->size, dsp->target->image_id);
+	if (err)
 		goto release;
-	}
-	sha256(firmware->data, firmware->size, digest);
-	if (hex2bin(expected, dsp->target->sha256, sizeof(expected)) ||
-	    memcmp(digest, expected, sizeof(digest))) {
-		err = -EBADMSG;
-		goto release;
-	}
 	err = n1x_adsp_dma_gate(dsp->dev);
 	if (err)
 		goto release;
@@ -540,7 +526,7 @@ static int n1x_adsp_primary_route(struct n1x_adsp *dsp)
 	unsigned int i;
 	int err;
 
-	asd = bus_find_device_by_name(&platform_bus_type, NULL, "NVDA9022:00");
+	asd = n1x_adsp_find_device("NVDA9022");
 	if (!asd)
 		return -ENODEV;
 	err = device_property_read_u32(asd, "acpi-asd-hw-ver", &version);
@@ -737,8 +723,7 @@ static int n1x_adsp_probe(struct platform_device *pdev)
 	unsigned int i;
 	int irq, err;
 
-	if (!dmi_match(DMI_PRODUCT_NAME, "ProArt P16 H7607BA") ||
-	    !dmi_match(DMI_BIOS_VERSION, "H7607BA.300") || !adev)
+	if (!adev)
 		return -ENODEV;
 	for (i = 0; i < ARRAY_SIZE(targets); i++)
 		if (!strcmp(acpi_device_hid(adev), targets[i].hid))
@@ -748,15 +733,17 @@ static int n1x_adsp_probe(struct platform_device *pdev)
 	config = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	shared = platform_get_resource(pdev, IORESOURCE_MEM, 4);
 	mailbox = platform_get_resource(pdev, IORESOURCE_MEM, 5);
-	if (!config || !shared || !mailbox || config->start != targets[i].config ||
-	    shared->end != (u64)targets[i].shared_end - 1 || resource_size(shared) < 0x400 ||
-	    mailbox->start != targets[i].mailbox || resource_size(mailbox) != 0x1000)
+	if (!config || !shared || !mailbox || resource_size(config) < sizeof(u32) ||
+	    resource_size(shared) < 0x400 ||
+	    resource_size(mailbox) < ADSP_OUT_CLEAR + sizeof(u32))
 		return -ENODEV;
 	dsp = devm_kzalloc(dev, sizeof(*dsp), GFP_KERNEL);
 	if (!dsp)
 		return -ENOMEM;
 	dsp->dev = dev;
 	dsp->target = &targets[i];
+	dsp->firmware = dsp->target->firmware;
+	device_property_read_string(dev, "firmware-name", &dsp->firmware);
 	mutex_init(&dsp->lock);
 	init_completion(&dsp->ready);
 	init_completion(&dsp->ipc_done);
@@ -1102,7 +1089,7 @@ static int n1x_adsp_primary_descriptor(struct n1x_adsp *dsp, u8 channel, u16 com
 	return 0;
 }
 
-/* The P16 route-2 playback chain has one SRAM-backed processing task. */
+/* The route-2 playback chain has one SRAM-backed processing task. */
 static int n1x_adsp_processing_open(struct n1x_adsp *dsp,
 				   struct mt8901_afe_sram_buffer *peer)
 {
@@ -1135,8 +1122,9 @@ static int n1x_adsp_processing_open(struct n1x_adsp *dsp,
 	if (err)
 		goto put;
 	if (!memory.area || memory.bytes != 2 * ADSP_MESSAGE_BYTES ||
-	    memory.afe_address < 0x1a6c0000 ||
-	    memory.afe_address > 0x1a6d4000 - memory.bytes) {
+	    !memory.afe_address || (memory.afe_address & 15) ||
+	    memory.afe_address > DMA_BIT_MASK(32) ||
+	    memory.bytes - 1 > DMA_BIT_MASK(32) - memory.afe_address) {
 		err = -ERANGE;
 		goto put;
 	}
@@ -1797,5 +1785,5 @@ EXPORT_SYMBOL_GPL(n1x_adsp_primary_abi);
 
 module_platform_driver(n1x_adsp_driver);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Experimental P16 MT8901 DSP boot, IPC and playback services");
+MODULE_DESCRIPTION("MT8901 DSP boot, IPC and playback services");
 MODULE_VERSION("0.1.14");

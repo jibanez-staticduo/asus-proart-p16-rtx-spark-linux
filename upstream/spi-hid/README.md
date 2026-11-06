@@ -31,7 +31,7 @@ The four fixes are:
 2. Evaluate `_RST` using the ACPI namespace handle.
 3. Select and receive input versus feature reports correctly, and retain the
    request mutex until the matching response has been copied.
-4. Restrict stream-only input handling to the P16 `MSFW1111` sensor hub. Its
+4. Restrict stream-only input handling to the `MSFW1111` sensor controller (HID VID 0000, PID 0100). Its
    asynchronous DATA reports complete HID sensor reads; synchronous raw input
    requests return `-EOPNOTSUPP`.
 

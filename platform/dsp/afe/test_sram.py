@@ -44,8 +44,6 @@ typedef uint8_t u8;typedef uint32_t u32;typedef uint64_t u64;typedef _Atomic int
 #define GFP_KERNEL 0
 #define NUMA_NO_NODE -1
 #define THIS_MODULE ((void *)1)
-#define DMI_PRODUCT_NAME 1
-#define DMI_BIOS_VERSION 2
 #define AUDIO_PD 5
 #define U32_MAX UINT32_MAX
 #define BIT(n) (1U<<(n))
@@ -110,7 +108,7 @@ static bool irq_stopping;static u32 mcu_word,dsp_word,clear_read;static u32 cfg_
 static unsigned managed_count;
 static void *managed[8];static void (*destructors[8])(void *);
 static int init_fault,property_fault,property_changed,datapath_error;
-static bool board_supported,node_present,module_alive,pm_enabled,pm_active,allocation_fails;
+static bool property_present,node_present,module_alive,pm_enabled,pm_active,allocation_fails;
 static int resume_error;
 static unsigned char *mapping;
 static u32 version,count,properties[4];
@@ -155,9 +153,8 @@ static int regmap_update_bits(void *map,int reg,u32 mask,u32 value)
 static int irq_fs(struct snd_pcm_substream *s,unsigned rate)
 {assert(s==&stream && rate==s->runtime->rate && locked);return fs_value;}
 static int unsupported_pbuf(struct snd_pcm_substream *s) {(void)s;return 0;}
-static bool dmi_match(int which,const char *value)
-{assert((which==1 && !strcmp(value,"ProArt P16 H7607BA"))||
-        (which==2 && !strcmp(value,"H7607BA.300")));return board_supported;}
+static bool device_property_present(struct device *dev,const char *key)
+{assert(dev==&device && !strcmp(key,"acpi-asd-sram-resource-list"));return property_present;}
 static int device_property_read_u32(struct device *dev,const char *key,u32 *value)
 {assert(dev==&device);if(property_fault==1)return -EIO;
  if(!strcmp(key,"acpi-asd-hw-ver"))*value=version;
@@ -187,15 +184,15 @@ static void *devm_kzalloc(struct device *dev,size_t n,int flags)
 {assert(dev==&device && !flags);if(init_fault==2)return NULL;
  void *p=calloc(1,n);assert(p);manage(p,free);return p;}
 static void *devm_ioremap_resource(struct device *dev,const struct resource *res)
-{assert(dev==&device && res->start==0x1a6c0000 && res->end==0x1a6d3fff);
+{assert(dev==&device && res->start==properties[1] && res->end==(uint64_t)properties[1]+properties[0]-1);
  assert(!strcmp(res->name,"mt8901-afe-sram"));if(init_fault==3)return ERR_PTR(-EBUSY);
- mapping=aligned_alloc(16,81920);assert(mapping);memset(mapping,0xa5,81920);
+ mapping=aligned_alloc(16,properties[0]);assert(mapping);memset(mapping,0xa5,properties[0]);
  manage(mapping,free);return mapping;}
 static struct gen_pool *gen_pool_create(int order,int nid)
 {assert(order==4 && nid==-1);if(init_fault==4)return NULL;
  struct gen_pool *p=calloc(1,sizeof(*p));assert(p);pools++;return p;}
 static int gen_pool_add_virt(struct gen_pool *p,unsigned long virt,unsigned long phys,size_t n,int nid)
-{assert(p && virt==(unsigned long)mapping && phys==0x1a6c0000 && n==81920 && nid==-1);
+{assert(p && virt==(unsigned long)mapping && phys==properties[1] && n==properties[0] && nid==-1);
  p->base=virt;return init_fault==5?-EINVAL:0;}
 static void gen_pool_destroy(struct gen_pool *p)
 {assert(p && pools);for(unsigned i=0;i<5120;i++)assert(!p->used[i]);pools--;free(p);}
@@ -255,7 +252,7 @@ static void reset(void)
  for(unsigned i=0;i<16;i++){afe.memif[i].substream=&stream;afe.memif[i].irq_usage=i;}
  for(unsigned i=0;i<22;i++)afe.irqs[i].irq_occupyed=true;
  init_fault=property_fault=property_changed=resume_error=datapath_error=0;
- board_supported=node_present=module_alive=pm_enabled=true;pm_active=allocation_fails=false;
+ property_present=node_present=module_alive=pm_enabled=true;pm_active=allocation_fails=false;
  version=count=1;memcpy(properties,(u32[]){81920,0x1a6c0000,0x1a6c0000,0x4e5c0000},sizeof(properties));
  io_bytes=barriers=hardware_calls=0;mapping=NULL;
  program_calls=program_fail_at=expected_offset=expected_irq=0;
@@ -289,11 +286,25 @@ static void *irq_prepare_thread(void *arg)
 {assert(!mt8901_afe_sram_prepare_irq(arg));return NULL;}
 int main(void)
 {
- reset();board_supported=false;assert(!mt8901_afe_sram_init(&afe) && !private.sram && !managed_count);
+ reset();property_present=false;assert(!mt8901_afe_sram_init(&afe) && !private.sram && !managed_count);
  for(unsigned fault=0;fault<12;fault++){
   reset();if(fault==0)version=2;else if(fault==1)count=2;else if(fault==2)node_present=false;
   else if(fault<8)property_fault=fault-2;else property_changed=fault-7;
   assert(mt8901_afe_sram_init(&afe)<0 && !private.sram && !node_refs && !managed_count && !pools && !io_bytes);
+ }
+ /* A different firmware SRAM tuple is accepted without any host identity. */
+ reset();properties[0]=4096;properties[1]=0x20000000;properties[2]=0x30000000;properties[3]=0x50000000;
+ init();struct mt8901_afe_sram_buffer *relocated=mt8901_afe_sram_reserve(&device,4096);
+ struct mt8901_afe_sram_view relocated_view;assert(!IS_ERR(relocated));
+ assert(!mt8901_afe_sram_view(relocated,&relocated_view));
+ assert(relocated_view.bytes==4096 && relocated_view.cpu_address==properties[1] &&
+        relocated_view.afe_address==properties[2] && relocated_view.dsp_address==properties[3]);
+ assert(!mt8901_afe_sram_release(relocated));empty();
+ for(unsigned field=0;field<4;field++){
+  reset();properties[field]=0;assert(mt8901_afe_sram_init(&afe)<0 && !managed_count);
+ }
+ for(unsigned field=1;field<4;field++){
+  reset();properties[field]=0xfffffff0U;assert(mt8901_afe_sram_init(&afe)==-ERANGE && !managed_count);
  }
  for(unsigned fault=1;fault<=6;fault++){
   reset();init_fault=fault;assert(mt8901_afe_sram_init(&afe)<0);

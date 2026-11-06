@@ -26,7 +26,7 @@
     "linux-input@vger.kernel.org (open list:HID CORE LAYER)",
     "linux-kernel@vger.kernel.org (open list)"
   ],
-  "0004-HID-spi-hid-handle-P16-stream-only-input-reports.patch": [
+  "0004-HID-spi-hid-handle-MSFW1111-stream-only-input-reports.patch": [
     "Jiri Kosina <jikos@kernel.org> (maintainer:HID CORE LAYER)",
     "Benjamin Tissoires <bentiss@kernel.org> (maintainer:HID CORE LAYER)",
     "Jingyuan Liang <jingyliang@chromium.org> (blamed_fixes:1/1=100%)",

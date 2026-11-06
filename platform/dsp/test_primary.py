@@ -42,7 +42,7 @@ struct fwnode_handle {unsigned index;};
 static int atomic_read(atomic_t *p) {return *p;}
 static struct platform_driver n1x_adsp_driver;
 static struct device device,asd;
-static unsigned long platform_bus_type;
+
 static struct fwnode_handle nodes[2]={{0},{1}};
 static int device_locks,request_locks,lock_error,asd_refs,node_refs;
 static unsigned property_reads,child_reads,transfers,barriers;
@@ -57,9 +57,9 @@ static void *dev_get_drvdata(struct device *dev) {assert(dev==&device);return de
 static int mutex_lock_interruptible(struct mutex *lock)
 {(void)lock;if(lock_error)return lock_error;assert(!request_locks++);return 0;}
 static void mutex_unlock(struct mutex *lock) {(void)lock;assert(request_locks--==1);}
-static struct device *bus_find_device_by_name(void *bus,void *from,const char *name)
+static struct device *n1x_adsp_find_device(const char *name)
 {
- assert(bus==&platform_bus_type && !from && !strcmp(name,"NVDA9022:00"));
+ assert(!strcmp(name,"NVDA9022"));
  if(missing_asd)return NULL;asd_refs++;return &asd;
 }
 static void put_device(struct device *dev) {assert(dev==&asd && asd_refs--==1 && !node_refs);}

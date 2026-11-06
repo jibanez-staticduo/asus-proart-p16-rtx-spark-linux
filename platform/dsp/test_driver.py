@@ -69,6 +69,7 @@ def main():
 #include <errno.h>
 #include "n1x_adsp_client.h"
 #include "n1x_sroot_client.h"
+#include "n1x_sroot_firmware.h"
 typedef uint8_t u8;typedef uint16_t u16;typedef uint32_t u32;typedef uint64_t u64,dma_addr_t;
 typedef int irqreturn_t;
 #define __iomem
@@ -117,17 +118,17 @@ struct device { struct device_driver *driver; } device;
 struct completion { bool done; };
 struct mutex { int unused; };
 struct firmware { const u8 *data;size_t size; };
-static bool enable_boot=true,privileged=true,provider=true,valid_hash=true;
+static bool enable_boot=true,privileged=true,provider=true;
 static int fault,reads,writes,pm_refs,module_refs,symbol_refs,uploads,frees,waits;
-static unsigned long platform_bus_type;
+
 static u8 firmware_bytes[631436];
 static struct firmware firmware={firmware_bytes,sizeof(firmware_bytes)};
 static void *allocation;
 static u32 shared_memory[256],mailbox_memory[1024];
 static int n1x_adsp_dma_gate(struct device *d) {assert(d==&device);return fault==2?-EOPNOTSUPP:0;}
 static bool capable(int cap) {assert(cap==CAP_SYS_RAWIO);return privileged;}
-static struct device *bus_find_device_by_name(void *bus,void *from,const char *name) {
- assert(bus==&platform_bus_type && !from && !strcmp(name,"NVDA8301:00"));return NULL;
+static struct device *n1x_adsp_find_device(const char *name) {
+ assert(!strcmp(name,"NVDA8301"));return NULL;
 }
 static void device_lock(struct device *d) {(void)d;assert(0);}
 static void device_unlock(struct device *d) {(void)d;assert(0);}
@@ -138,14 +139,6 @@ static int request_firmware_direct(const struct firmware **fw,const char *name,s
  assert(symbol_refs==1 && !reads && !writes);if(fault==1)return -ENOENT;*fw=&firmware;return 0;
 }
 static void release_firmware(const struct firmware *fw) {assert(fw==&firmware);}
-static int hex2bin(u8 *out,const char *in,size_t count) {
- for(size_t i=0;i<count;i++){unsigned value;assert(sscanf(in+2*i,"%2x",&value)==1);out[i]=value;}return 0;
-}
-static void sha256(const u8 *data,size_t bytes,u8 *out) {
- assert(data==firmware.data && bytes==firmware.size);
- hex2bin(out,"350e0d40b2f8a6dfb486d8dfd3362fb5b02ceb90da372176b008498adbca8cc4",32);
- if(!valid_hash)out[0]^=1;
-}
 static int dma_set_mask_and_coherent(struct device *d,u64 mask) {
  assert(d==&device && mask==0xffffffff);return fault==3?-EIO:0;
 }
@@ -210,13 +203,22 @@ static int upload_stub(u32 id,const u8 *image,size_t bytes,struct n1x_sroot_clie
  }
  return 0;
 }
+static void image_put32(u8 *p,u32 value) {for(unsigned i=0;i<4;i++)p[i]=value>>(8*i);}
+static void make_image(u8 *p,size_t bytes,u32 id)
+{
+ assert(bytes>=83);memset(p,0,bytes);p[0]=0x59;
+ u8 *n=p+3;image_put32(n,1);image_put32(n+4,2);image_put32(n+8,0xefbeadde);
+ image_put32(n+12,0xefbeadde);image_put32(n+16,id);image_put32(n+32,80);
+ image_put32(n+44,0xefbeadde);image_put32(n+48,id);image_put32(n+56,80);
+ image_put32(n+64,bytes-83);image_put32(n+76,0xefbeadde);
+}
 static void reset(void) {
  free(allocation);allocation=NULL;memset(&dsp,0,sizeof(dsp));
  memset(shared_memory,0,sizeof(shared_memory));memset(mailbox_memory,0,sizeof(mailbox_memory));
- enable_boot=privileged=provider=valid_hash=true;fault=reads=writes=pm_refs=module_refs=symbol_refs=uploads=frees=waits=0;
+ enable_boot=privileged=provider=true;fault=reads=writes=pm_refs=module_refs=symbol_refs=uploads=frees=waits=0;
  power_calls=power_reply=in_irq=0;power_value=0;
- dsp.dev=&device;dsp.target=&targets[0];dsp.shared=shared_memory;dsp.mailbox=mailbox_memory;
- firmware.size=sizeof(firmware_bytes);
+ dsp.dev=&device;dsp.target=&targets[0];dsp.firmware=dsp.target->firmware;dsp.shared=shared_memory;dsp.mailbox=mailbox_memory;
+ firmware.size=sizeof(firmware_bytes);make_image(firmware_bytes,firmware.size,0xc0304);
 }
 static void power_notification(unsigned type,u32 value)
 {
@@ -253,7 +255,7 @@ int main(void) {
  assert(!n1x_adsp_boot(&dsp) && dsp.boot_ready); /* Observed uninitialized SRAM is not a DMA window. */
  for(int guard=0;guard<6;guard++) {
   reset();if(guard==0)enable_boot=false;if(guard==1)privileged=false;if(guard==2)provider=false;
-  if(guard==3)valid_hash=false;if(guard==4)firmware.size--;if(guard==5)dsp.target=&targets[1];
+  if(guard==3)firmware_bytes[0]=0;if(guard==4)firmware.size--;if(guard==5)dsp.target=&targets[1];
   assert(n1x_adsp_boot(&dsp)<0);assert(!reads && !writes && !pm_refs && !module_refs && !symbol_refs);
  }
  reset();assert(n1x_adsp_irq(0,&dsp)==IRQ_NONE && !reads && !writes);

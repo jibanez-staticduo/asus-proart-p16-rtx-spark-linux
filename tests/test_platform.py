@@ -126,11 +126,14 @@ class SCPRefreshTests(unittest.TestCase):
 
 
 class ProviderBootServiceTests(unittest.TestCase):
-    def layout(self, root):
+    def layout(self, root, instance="00"):
         controls = []
-        for index, (name, supplier) in enumerate((("NVDA200A:00", "smmu3.0x0000000035000000"), ("NVDA8600:00", "smmu3.0x0000000014900000"))):
+        for index, hid in enumerate(("NVDA200A", "NVDA8600")):
+            name, supplier = f"{hid}:{instance}", f"iommu-controller-{index}"
             device = root / "bus/platform/devices" / name
             device.mkdir(parents=True)
+            (device / "firmware_node").mkdir()
+            (device / "firmware_node/hid").write_text(hid + "\n")
             iommu = root / supplier
             iommu.mkdir()
             (device / "iommu").symlink_to(iommu)
@@ -158,10 +161,6 @@ class ProviderBootServiceTests(unittest.TestCase):
             self.assertTrue(all(p.read_text().strip() == "DMA" for p in controls))
 
     def run_helper(self, root, mode):
-        dmi = root / "class/dmi/id"
-        dmi.mkdir(parents=True, exist_ok=True)
-        for key, value in (("sys_vendor", "ASUS"), ("product_name", "ProArt P16 H7607BA"), ("bios_version", "H7607BA.300")):
-            (dmi / key).write_text(value + "\n")
         # Replace literal sysfs paths in a test-only copy; the installed helper
         # deliberately has no environment override for hardware access.
         script = (ROOT / "platform/dsp/provider/n1x-platform-npu-start").read_text()
@@ -170,11 +169,29 @@ class ProviderBootServiceTests(unittest.TestCase):
 
     def test_host_check_has_no_kernel_version_allowlist(self):
         with tempfile.TemporaryDirectory() as directory:
-            result = self.run_helper(Path(directory), "--check-host")
+            root = Path(directory)
+            self.layout(root, instance="17")
+            result = self.run_helper(root, "--check-host")
             self.assertEqual(result.returncode, 0, result.stderr)
         script = (ROOT / "platform/dsp/provider/n1x-platform-npu-start").read_text()
         self.assertNotIn("uname", script)
         self.assertNotIn("python", script)
+        self.assertNotIn("dmi", script)
+        self.assertNotIn("smmu3.0x", script)
+        self.assertNotIn("NVDA200A:00", script)
+
+    def test_other_instance_names_work_without_dmi_and_ambiguous_devices_are_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            controls = self.layout(root, instance="42")
+            self.assertEqual(self.run_helper(root, "--prepare").returncode, 0)
+            self.assertTrue(all(p.read_text().strip() == "DMA" for p in controls))
+            duplicate = root / "bus/platform/devices/NVDA200A:99/firmware_node"
+            duplicate.mkdir(parents=True)
+            (duplicate / "hid").write_text("NVDA200A\n")
+            result = self.run_helper(root, "--check-host")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Multiple", result.stderr)
 
     def test_partially_bound_endpoints_prevent_domain_changes(self):
         with tempfile.TemporaryDirectory() as directory:

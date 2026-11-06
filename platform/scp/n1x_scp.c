@@ -2,7 +2,6 @@
 /* N1X SCP platform-firmware queries and firmware log reader. */
 #include <linux/acpi.h>
 #include <linux/debugfs.h>
-#include <linux/dmi.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
 #include <linux/module.h>
@@ -19,7 +18,6 @@
 #define N1X_LOG_HEADER_SIZE 0x10
 #define N1X_LOG_RECORD_SIZE 0x80
 #define N1X_LOG_MAGIC 0x5a5a5a5a
-#define N1X_SRAM_SIZE 0x80000
 #define N1X_MBOX_IN_SET 0x100
 #define N1X_MBOX_OUT_STATUS 0x104
 #define N1X_MBOX_OUT_CLEAR 0x10c
@@ -27,7 +25,7 @@
 
 static bool enable_mailbox;
 module_param(enable_mailbox, bool, 0400);
-MODULE_PARM_DESC(enable_mailbox, "Enable bounded firmware queries on the validated P16 SCP firmware");
+MODULE_PARM_DESC(enable_mailbox, "Enable bounded firmware queries on the supported SCP firmware");
 
 struct n1x_scp_message {
 	__le16 token;
@@ -219,14 +217,22 @@ DEFINE_SHOW_ATTRIBUTE(n1x_scp_log);
 /* Each open owns a bounded SRAM copy rather than a devm MMIO pointer.
  * The protected debugfs open synchronizes the copy with device removal.
  */
+struct n1x_scp_snapshot {
+	size_t bytes;
+	u8 data[];
+};
+
 static int n1x_scp_snapshot_open(struct inode *inode, struct file *file)
 {
 	struct n1x_scp *scp = inode->i_private;
-	void *snapshot = kvmalloc(N1X_SRAM_SIZE, GFP_KERNEL);
+	struct n1x_scp_snapshot *snapshot;
+
+	snapshot = kvmalloc(struct_size(snapshot, data, scp->size), GFP_KERNEL);
 
 	if (!snapshot)
 		return -ENOMEM;
-	memcpy_fromio(snapshot, scp->sram, N1X_SRAM_SIZE);
+	snapshot->bytes = scp->size;
+	memcpy_fromio(snapshot->data, scp->sram, snapshot->bytes);
 	file->private_data = snapshot;
 	return 0;
 }
@@ -234,8 +240,9 @@ static int n1x_scp_snapshot_open(struct inode *inode, struct file *file)
 static ssize_t n1x_scp_snapshot_read(struct file *file, char __user *buf,
 				   size_t count, loff_t *pos)
 {
-	return simple_read_from_buffer(buf, count, pos, file->private_data,
-				       N1X_SRAM_SIZE);
+	struct n1x_scp_snapshot *snapshot = file->private_data;
+
+	return simple_read_from_buffer(buf, count, pos, snapshot->data, snapshot->bytes);
 }
 
 static int n1x_scp_snapshot_release(struct inode *inode, struct file *file)
@@ -266,12 +273,9 @@ static int n1x_scp_probe(struct platform_device *pdev)
 	u16 capacity;
 	int ret;
 
-	/* The SRAM and mailbox layout below is specific to this BIOS. */
-	if (!dmi_match(DMI_PRODUCT_NAME, "ProArt P16 H7607BA") ||
-	    !dmi_match(DMI_BIOS_VERSION, "H7607BA.300"))
-		return -ENODEV;
 	sram = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	if (!sram || sram->start != 0x1a800000 || resource_size(sram) != N1X_SRAM_SIZE)
+	if (!sram || resource_size(sram) <
+	    N1X_LOG_OFFSET + N1X_LOG_HEADER_SIZE + N1X_LOG_RECORD_SIZE)
 		return dev_err_probe(dev, -ENODEV, "unrecognized SCP SRAM resource\n");
 	scp = devm_kzalloc(dev, sizeof(*scp), GFP_KERNEL);
 	if (!scp)
@@ -285,24 +289,23 @@ static int n1x_scp_probe(struct platform_device *pdev)
 	if (ret)
 		return dev_err_probe(dev, ret, "platform SCP firmware log is not available\n");
 	if (enable_mailbox) {
-		static const resource_size_t bases[] = {0x1aaa0000, 0x1aab0000};
 		/* Match the 2.0.8.0 dispatch and reply-header instructions before
-		 * enabling queries. BIOS version alone does not identify this ABI.
+		 * enabling queries. Hardware IDs do not identify the firmware ABI.
 		 */
 		static const u8 dispatch[] = {
 			0x63, 0x88, 0x2a, 0x46, 0x39, 0x46, 0x02, 0x20,
 			0x03, 0xf0, 0x5b, 0xfe, 0xb4, 0xf8, 0x02, 0x80,
 		};
 		u8 observed[sizeof(dispatch)];
-		int i;
+		unsigned int i;
 
 		memcpy_fromio(observed, scp->sram + 0x41ce, sizeof(observed));
 		if (memcmp(observed, dispatch, sizeof(dispatch)))
 			return dev_err_probe(dev, -ENODEV, "unrecognized SCP firmware dispatch ABI\n");
-		for (i = 0; i < ARRAY_SIZE(bases); i++) {
+		for (i = 0; i < ARRAY_SIZE(scp->mailbox); i++) {
 			struct resource *res = platform_get_resource(pdev, IORESOURCE_MEM, i + 3);
 
-			if (!res || res->start != bases[i] || resource_size(res) != 0x1000)
+			if (!res || resource_size(res) < N1X_MBOX_OUT_CLEAR + sizeof(u32))
 				return dev_err_probe(dev, -ENODEV, "unrecognized SCP mailbox resource\n");
 			scp->mailbox[i] = devm_ioremap_resource(dev, res);
 			if (IS_ERR(scp->mailbox[i]))

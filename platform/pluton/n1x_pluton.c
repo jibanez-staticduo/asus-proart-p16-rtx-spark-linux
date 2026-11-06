@@ -4,7 +4,6 @@
 #include <linux/capability.h>
 #include <linux/compat.h>
 #include <linux/delay.h>
-#include <linux/dmi.h>
 #include <linux/fs.h>
 #include <linux/io.h>
 #include <linux/iopoll.h>
@@ -504,15 +503,12 @@ static int n1x_pluton_probe(struct platform_device *pdev)
 	unsigned long long revision;
 	int ret;
 
-	if (!dmi_match(DMI_PRODUCT_NAME, "ProArt P16 H7607BA") ||
-	    !dmi_match(DMI_BIOS_VERSION, "H7607BA.300"))
-		return -ENODEV;
 	if (ACPI_FAILURE(acpi_evaluate_integer(ACPI_HANDLE(dev), "_HRV", NULL, &revision)) ||
 	    revision != 1)
 		return -ENODEV;
 	regs = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	stride = platform_get_resource(pdev, IORESOURCE_MEM, 1);
-	if (!regs || !stride || regs->start != 0x18020000 || resource_size(regs) != 0x1000 ||
+	if (!regs || !stride || resource_size(regs) < N1X_ROT_ERROR_CLEAR1 + sizeof(u32) ||
 	    stride->start != regs->start || resource_size(stride) != 0x10)
 		return dev_err_probe(dev, -ENODEV, "unrecognized ROT1 mailbox resources\n");
 	p = kzalloc_obj(*p);

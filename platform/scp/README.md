@@ -4,8 +4,8 @@ The driver reads the platform-owned SCP firmware log and supports firmware
 version and sensor-descriptor queries. It does not start or reset the SCP.
 Sensor measurements use SPI HID and the standard HID ALS IIO client.
 
-The mailbox implementation is restricted to the P16 H7607BA with BIOS
-H7607BA.300. It checks the SRAM and mailbox resource layouts and the firmware
+The driver uses the SRAM and mailbox resources supplied by ACPI, without a
+product-name or BIOS-version restriction. It checks their sizes and the firmware
 dispatch instructions before enabling transactions. The firmware's descriptor
 query lacks an index bounds check, so the driver permits only slot 1 after
 checking the two-slot layout. A timeout or unmatched response prevents further

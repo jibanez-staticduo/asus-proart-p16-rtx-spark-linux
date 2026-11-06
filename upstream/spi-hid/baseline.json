@@ -49,11 +49,11 @@
     "0001-HID-spi-hid-retry-ACPI-GPIO-IRQ-lookup-at-probe.patch",
     "0002-HID-spi-hid-evaluate-reset-on-the-ACPI-handle.patch",
     "0003-HID-spi-hid-serialize-and-type-GET-report-responses.patch",
-    "0004-HID-spi-hid-handle-P16-stream-only-input-reports.patch"
+    "0004-HID-spi-hid-handle-MSFW1111-stream-only-input-reports.patch"
   ],
   "result": {
     "spi-hid-acpi.c": "6a0e9c671885d79751581d4ceb9b4ad2b1c60941a74ded1598d6350e7f6e479f",
-    "spi-hid-core.c": "aa0af714a7afb10270409daad97b6709de7d9a86d3700db61f6015db96a6d303",
+    "spi-hid-core.c": "ead9464951f016794606f29fda61b683d8bd7a58de32981dc6faf7a16562cf1e",
     "spi-hid-core.h": "f46c83c9f1a71dec3c207dda1c4f8ebb71daf08b7e0daa8cc786e9bee5bfa9a4",
     "spi-hid.h": "2af9a1c759b9e782fde41718ce707f6963a27a72141e2a1d70dce6b76c850854",
     "spi-hid-trace.h": "38a9db45b7d5a05842731c0c6e2304d72f2cbe42ad78cb9b3ce0c9cfedb6c3fc"

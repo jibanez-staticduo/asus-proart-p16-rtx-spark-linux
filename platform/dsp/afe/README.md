@@ -5,8 +5,10 @@ in the P16 kernel recipe. The patch adds the SRAM owner to the existing AFE
 module, with a private gen_pool and a kernel-only opaque lease API. It is an
 uninstalled integration candidate; the running AFE module is unchanged.
 
-Initialization checks the P16 product, BIOS, hardware version and complete
-SRAM property tuple before claiming the 80 KiB I/O resource. It maps the SRAM
+Initialization checks the ASD hardware version and reads the complete SRAM
+property tuple before claiming the firmware-described I/O resource. Its size,
+CPU/VAD/DSP address alignment and 32-bit bounds are checked without comparing
+against a product name, BIOS version or fixed address tuple. It maps the SRAM
 without reading or clearing it. The native mapping at `nvasd` `0x140024560`
 uses `MmMapIoSpace` with cache type 0; Microsoft's
 [cache-type definition](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/ne-wdm-_memory_caching_type)

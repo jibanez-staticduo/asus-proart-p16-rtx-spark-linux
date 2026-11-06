@@ -9,7 +9,7 @@ static int __init n1x_adsp_primary_check_init(void)
 	struct device *dsp;
 	int err;
 
-	dsp = bus_find_device_by_name(&platform_bus_type, NULL, "NVDA8303:00");
+	dsp = n1x_adsp_find_device("NVDA8303");
 	if (!dsp)
 		return -ENODEV;
 	err = n1x_adsp_prepare_primary(dsp);
@@ -26,4 +26,4 @@ static void __exit n1x_adsp_primary_check_exit(void)
 module_init(n1x_adsp_primary_check_init);
 module_exit(n1x_adsp_primary_check_exit);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("P16 DSP primary message-buffer registration validation");
+MODULE_DESCRIPTION("MT8901 DSP primary message-buffer registration validation");

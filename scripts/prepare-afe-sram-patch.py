@@ -40,6 +40,7 @@ def sources(base):
     after[path] = replace_once(after[path], 'int mt8901_afe_fs_timing(',
                               'struct platform_driver;\nextern struct platform_driver mt8901_afe_pcm_driver;\n'
                               'int mt8901_afe_sram_init(struct mtk_base_afe *afe);\n'
+                              'size_t mt8901_afe_sram_size(struct mtk_base_afe *afe);\n'
                               'bool mt8901_afe_sram_busy(struct mtk_base_afe *afe);\n\n'
                               'int mt8901_afe_sram_domain(struct mtk_base_afe *afe, int id);\n\n'
                               'int mt8901_afe_sram_startup(struct snd_pcm_substream *substream,\n'
@@ -133,7 +134,7 @@ def main():
     before, after = sources(args.source_tree)
     patch = ('Subject: [PATCH] ASoC: mediatek: mt8901: add DSP playback and SRAM ownership\n\n'
              'Provide exclusive, aligned SRAM leases through the AFE owner on the\n'
-             'validated P16 firmware layout. Each lease retains device, module and\n'
+             'firmware-described SRAM layout. Each lease retains device, module and\n'
              'runtime-PM references. Refuse forced suspend while leases exist and\n'
              'disable manual driver detachment. Published buffers remain retained\n'
              'until reboot; whole-core quiesce and release are separate work.\n\n'

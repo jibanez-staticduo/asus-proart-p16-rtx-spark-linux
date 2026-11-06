@@ -1,7 +1,7 @@
 Subject: [PATCH] ASoC: mediatek: mt8901: add DSP playback and SRAM ownership
 
 Provide exclusive, aligned SRAM leases through the AFE owner on the
-validated P16 firmware layout. Each lease retains device, module and
+firmware-described SRAM layout. Each lease retains device, module and
 runtime-PM references. Refuse forced suspend while leases exist and
 disable manual driver detachment. Published buffers remain retained
 until reboot; whole-core quiesce and release are separate work.
@@ -136,7 +136,7 @@ streaming qualification.
 +#endif
 --- /dev/null
 +++ b/include/sound/n1x_adsp_client.h
-@@ -0,0 +1,160 @@
+@@ -0,0 +1,179 @@
 +/* SPDX-License-Identifier: GPL-2.0-only */
 +#ifndef N1X_ADSP_CLIENT_H
 +#define N1X_ADSP_CLIENT_H
@@ -147,6 +147,25 @@ streaming qualification.
 +struct device;
 +struct n1x_adsp_primary;
 +struct mt8901_afe_sram_buffer;
++
++#ifdef __KERNEL__
++#include <linux/acpi.h>
++#include <linux/platform_device.h>
++
++/* Returns a referenced platform device, independent of ACPI instance names. */
++static inline struct device *n1x_adsp_find_device(const char *hid)
++{
++	struct acpi_device *adev;
++	struct device *dev;
++
++	adev = acpi_dev_get_first_match_dev(hid, NULL, -1);
++	if (!adev)
++		return NULL;
++	dev = bus_find_device_by_acpi_dev(&platform_bus_type, adev);
++	acpi_dev_put(adev);
++	return dev;
++}
++#endif
 +
 +#define N1X_ADSP_PRIMARY_ABI 1U
 +
@@ -181,7 +200,7 @@ streaming qualification.
 +		      struct n1x_adsp_ipc_reply *reply);
 +
 +/* Register the primary playback task's four message buffers on the core
-+ * selected by the speaker/headphone firmware properties (P16 route 2, HiFi1).
++ * selected by the speaker/headphone firmware properties (route 2, HiFi1).
 + * Route 3 selects a different native task graph and is not implemented here.
 + * Registered buffers
 + * remain owned by the DSP boot allocation; this call does not open a stream.
@@ -654,7 +673,7 @@ streaming qualification.
  	u32 hw_ver;               /* acpi-asd-hw-ver from _DSD */
  	struct mtk_dai_memif_irq_priv irq_priv[MT8901_AFE_IRQ_NUM];
  	int pm_runtime_bypass_reg_ctl;
-@@ -86,6 +91,16 @@
+@@ -86,6 +91,17 @@
  	/* dai */
  	void *dai_priv[MT8901_DAI_NUM];
  };
@@ -662,6 +681,7 @@ streaming qualification.
 +struct platform_driver;
 +extern struct platform_driver mt8901_afe_pcm_driver;
 +int mt8901_afe_sram_init(struct mtk_base_afe *afe);
++size_t mt8901_afe_sram_size(struct mtk_base_afe *afe);
 +bool mt8901_afe_sram_busy(struct mtk_base_afe *afe);
 +
 +int mt8901_afe_sram_domain(struct mtk_base_afe *afe, int id);
@@ -673,7 +693,7 @@ streaming qualification.
  /* dai register */
 --- /dev/null
 +++ b/sound/soc/mediatek/mt8901/mt8901-afe-dsp.c
-@@ -0,0 +1,435 @@
+@@ -0,0 +1,441 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +#include <linux/err.h>
 +#include <linux/interrupt.h>
@@ -691,7 +711,7 @@ streaming qualification.
 +#include "../common/mtk-afe-platform-driver.h"
 +
 +/* The processing task also needs two independently retained 1 KiB IPC slices. */
-+#define MT8901_DSP_RING_MAX (0x14000U - 2048U)
++#define MT8901_DSP_IPC_BYTES 2048U
 +
 +static bool dsp_playback;
 +module_param(dsp_playback, bool, 0400);
@@ -833,6 +853,7 @@ streaming qualification.
 +	struct snd_pcm_runtime *runtime = substream->runtime;
 +	struct mt8901_afe_dsp *dsp;
 +	struct device *dev;
++	size_t ring_max;
 +	int ret;
 +
 +	if (!dsp_playback || dai->id != MT8901_AFE_MEMIF_DL0 ||
@@ -840,6 +861,11 @@ streaming qualification.
 +		return 0;
 +	if (!substream->pcm->nonatomic || !priv->sram || priv->dsp)
 +		return -EOPNOTSUPP;
++	ring_max = mt8901_afe_sram_size(afe);
++	if (ring_max <= MT8901_DSP_IPC_BYTES)
++		return -ENOSPC;
++	ring_max -= MT8901_DSP_IPC_BYTES;
++
 +	dsp = kzalloc_obj(*dsp);
 +	if (!dsp)
 +		return -ENOMEM;
@@ -865,11 +891,11 @@ streaming qualification.
 +		goto free;
 +	}
 +	runtime->hw.channels_max = min(runtime->hw.channels_max, 2U);
-+	runtime->hw.buffer_bytes_max = min(runtime->hw.buffer_bytes_max, MT8901_DSP_RING_MAX);
-+	runtime->hw.period_bytes_max = min(runtime->hw.period_bytes_max, MT8901_DSP_RING_MAX / 2);
++	runtime->hw.buffer_bytes_max = min_t(unsigned int, runtime->hw.buffer_bytes_max, ring_max);
++	runtime->hw.period_bytes_max = min_t(unsigned int, runtime->hw.period_bytes_max, ring_max / 2);
 +	runtime->hw.info &= ~(SNDRV_PCM_INFO_PAUSE | SNDRV_PCM_INFO_RESUME |
 +			      SNDRV_PCM_INFO_NO_PERIOD_WAKEUP);
-+	dev = bus_find_device_by_name(&platform_bus_type, NULL, "NVDA8303:00");
++	dev = n1x_adsp_find_device("NVDA8303");
 +	if (!dev) {
 +		ret = -ENODEV;
 +		goto free;
@@ -1289,10 +1315,9 @@ streaming qualification.
  	},
 --- /dev/null
 +++ b/sound/soc/mediatek/mt8901/mt8901-afe-sram.c
-@@ -0,0 +1,650 @@
+@@ -0,0 +1,658 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +#include <linux/atomic.h>
-+#include <linux/dmi.h>
 +#include <linux/err.h>
 +#include <linux/genalloc.h>
 +#include <linux/io.h>
@@ -1308,13 +1333,12 @@ streaming qualification.
 +#include "mt8901-reg.h"
 +#include "../common/mtk-afe-fe-dai.h"
 +
-+#define MT8901_SRAM_BYTES 0x14000
 +#define MT8901_SRAM_ALIGN 16
 +
 +struct mt8901_afe_sram {
 +	struct gen_pool *pool;
 +	void __iomem *base;
-+	u32 cpu, vad, dsp;
++	u32 cpu, vad, dsp, bytes;
 +	atomic_t users;
 +	struct mt8901_afe_sram_buffer *memif[MT8901_AFE_MEMIF_NUM];
 +};
@@ -1343,14 +1367,11 @@ streaming qualification.
 +
 +int mt8901_afe_sram_init(struct mtk_base_afe *afe)
 +{
-+	static const struct {
-+		const char *name;
-+		u32 expected;
-+	} properties[] = {
-+		{"acpi-asd-sram-size", MT8901_SRAM_BYTES},
-+		{"acpi-asd-sram-cpu-view", 0x1a6c0000},
-+		{"acpi-asd-sram-vad-view", 0x1a6c0000},
-+		{"acpi-asd-sram-adsp-view", 0x4e5c0000},
++	static const char * const properties[] = {
++		"acpi-asd-sram-size",
++		"acpi-asd-sram-cpu-view",
++		"acpi-asd-sram-vad-view",
++		"acpi-asd-sram-adsp-view",
 +	};
 +	struct mt8901_afe_private *priv = afe->platform_priv;
 +	struct device *dev = afe->dev;
@@ -1362,8 +1383,7 @@ streaming qualification.
 +	unsigned int i;
 +	int ret;
 +
-+	if (!dmi_match(DMI_PRODUCT_NAME, "ProArt P16 H7607BA") ||
-+	    !dmi_match(DMI_BIOS_VERSION, "H7607BA.300"))
++	if (!device_property_present(dev, "acpi-asd-sram-resource-list"))
 +		return 0;
 +	ret = device_property_read_u32(dev, "acpi-asd-hw-ver", &version);
 +	if (ret)
@@ -1377,17 +1397,19 @@ streaming qualification.
 +	if (!node)
 +		return -ENODEV;
 +	for (i = 0; i < ARRAY_SIZE(properties); i++) {
-+		ret = fwnode_property_read_u32(node, properties[i].name, &values[i]);
++		ret = fwnode_property_read_u32(node, properties[i], &values[i]);
 +		if (ret)
 +			break;
-+		if (values[i] != properties[i].expected) {
-+			ret = -ENODEV;
-+			break;
-+		}
 +	}
 +	fwnode_handle_put(node);
 +	if (ret)
 +		return ret;
++	if (!values[0] || !IS_ALIGNED(values[0], MT8901_SRAM_ALIGN))
++		return -EINVAL;
++	for (i = 1; i < ARRAY_SIZE(values); i++)
++		if (!values[i] || !IS_ALIGNED(values[i], MT8901_SRAM_ALIGN) ||
++		    values[0] - 1 > U32_MAX - values[i])
++			return -ERANGE;
 +	group = devres_open_group(dev, NULL, GFP_KERNEL);
 +	if (!group)
 +		return -ENOMEM;
@@ -1415,6 +1437,7 @@ streaming qualification.
 +		goto release;
 +	}
 +	atomic_set(&sram->users, 0);
++	sram->bytes = values[0];
 +	sram->cpu = values[1];
 +	sram->vad = values[2];
 +	sram->dsp = values[3];
@@ -1427,6 +1450,13 @@ streaming qualification.
 +release:
 +	devres_release_group(dev, group);
 +	return ret;
++}
++
++size_t mt8901_afe_sram_size(struct mtk_base_afe *afe)
++{
++	struct mt8901_afe_private *priv = afe->platform_priv;
++
++	return priv->sram ? priv->sram->bytes : 0;
 +}
 +
 +bool mt8901_afe_sram_busy(struct mtk_base_afe *afe)
@@ -1444,7 +1474,7 @@ streaming qualification.
 +	unsigned long address;
 +	int ret;
 +
-+	if (!dev || !bytes || bytes > MT8901_SRAM_BYTES || !IS_ALIGNED(bytes, MT8901_SRAM_ALIGN))
++	if (!dev || !bytes || !IS_ALIGNED(bytes, MT8901_SRAM_ALIGN))
 +		return ERR_PTR(-EINVAL);
 +	buffer = kzalloc_obj(*buffer);
 +	if (!buffer)
@@ -1458,6 +1488,10 @@ streaming qualification.
 +	priv = afe->platform_priv;
 +	if (!priv->sram) {
 +		ret = -EOPNOTSUPP;
++		goto unlock;
++	}
++	if (bytes > priv->sram->bytes) {
++		ret = -EINVAL;
 +		goto unlock;
 +	}
 +	if (!try_module_get(THIS_MODULE)) {

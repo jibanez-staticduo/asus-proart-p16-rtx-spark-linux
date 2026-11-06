@@ -1,14 +1,14 @@
 pkgname=n1x-pluton-dkms
 pkgver=0.2.0
-pkgrel=1
-pkgdesc='P16 N1X ROT1/PFI transport and PCBI firmware queries'
+pkgrel=2
+pkgdesc='NVIDIA N1X ROT1/PFI transport and PCBI firmware queries'
 arch=('aarch64')
 url='https://github.com/johannhartmann/asus-proart-p16-rtx-spark-linux'
 license=('GPL-2.0-only')
 depends=('dkms' 'python')
 makedepends=('gcc')
 source=('n1x_pluton.c' 'n1x_pluton_protocol.h' 'n1x_pluton_uapi.h' 'Kbuild' 'dkms.conf' 'pluton-info.py' 'provenance.json' 'protocol_test.c' 'n1x-pluton.conf' 'n1x-pluton.modules' 'protocol.md' 'n1x_pcbi_protocol.h' 'test_query.py')
-sha256sums=('b3cccdaf2777dfb7cc0c720302b541033c1034b4c003feedea7a64c89952e2ab'
+sha256sums=('a7cd5cbb22867502915fcf82bb997633242b8263f5d3e6f5d48d78232c582b9b'
             '7409eef71d8d4a9d8df65773af3a0754257d4d2635bb09f437cdd7e452fdebb6'
             'fe33b23a549c596200a4f7aad7e83b4787a951957fe81729451b8fb49116918c'
             'fa4d3fb4830c446fcd4506f0973bc37d100f4d9b3e0f5092661216f5035fb5a3'
@@ -18,7 +18,7 @@ sha256sums=('b3cccdaf2777dfb7cc0c720302b541033c1034b4c003feedea7a64c89952e2ab'
             '2a6865978655a1ea61f85108306c7ced9459ea7ea77be0384dac1e4b5793ea96'
             '110b492c6e5d7c84d631d11dd5d214fe8c8cf0493bb0c03ec4293b30f6def19d'
             'f591ac50c5d162ec0a9d6bd4d7adadb50d55f815999d875ec30ad234a9d175ad'
-            '70c6b5b194d6292e6270794034b8156cef6c6b98b7d0bb701791bd34f584791d'
+            '3129448c497a1418aeb0a2710017de4bf0f2cf3c534d2aebc122227831718b93'
             '76e1f99a3bc870dfaf0701cee6b6ed2799b99477e0ca5e379ff4abb2a08021ab'
             '2be2bfe39eba1c8595aba6e5e7e822dfa64360e9eac28d8b0111783382b1160b')
 

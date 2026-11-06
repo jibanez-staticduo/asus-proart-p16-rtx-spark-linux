@@ -26,7 +26,6 @@
 #include <linux/completion.h>
 #include <linux/crc32.h>
 #include <linux/device.h>
-#include <linux/dmi.h>
 #include <linux/dmaengine.h>
 #include <linux/dma-mapping.h>
 #include <linux/err.h>
@@ -771,6 +770,13 @@ static int spi_hid_create_device(struct spi_hid *shid)
 	hid->version = shid->desc.hid_version;
 	hid->vendor = shid->desc.vendor_id;
 	hid->product = shid->desc.product_id;
+
+	/* This sensor controller supplies input through asynchronous DATA
+	 * reports. Identify the controller, independent of the host system.
+	 */
+	shid->input_stream_only = ACPI_COMPANION(dev) &&
+		acpi_dev_hid_uid_match(ACPI_COMPANION(dev), "MSFW1111", NULL) &&
+		hid->vendor == 0 && hid->product == 0x0100;
 
 	snprintf(hid->name, sizeof(hid->name), "spi %04X:%04X",
 		 hid->vendor, hid->product);
@@ -1608,9 +1614,6 @@ int spi_hid_core_probe(struct spi_device *spi, struct spihid_ops *ops,
 	shid->power_state = HIDSPI_ON;
 	shid->ops = ops;
 	shid->conf = conf;
-	shid->input_stream_only = dmi_match(DMI_PRODUCT_NAME, "ProArt P16 H7607BA") &&
-		ACPI_COMPANION(dev) &&
-		acpi_dev_hid_uid_match(ACPI_COMPANION(dev), "MSFW1111", NULL);
 	set_bit(SPI_HID_RESET_PENDING, &shid->flags);
 	shid->is_panel_follower = drm_is_panel_follower(&spi->dev);
 

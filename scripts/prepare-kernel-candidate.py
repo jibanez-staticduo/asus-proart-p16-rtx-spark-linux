@@ -62,7 +62,7 @@ def prepare(output, release, jobs):
         'local_kernel_inputs_pinned': True,
         'kernel_inputs': {name: hashlib.sha256(raw).hexdigest() for name, raw in inputs.items()},
         'pkgrel': release, 'jobs': jobs,
-        'expected_release': f'7.2.8-{release}-omarchy-p16-asus-npu',
+        'expected_release': f'7.2.8-{release}-omarchy-p16-asus-npu-asus',
         'source_date_epoch': subprocess.check_output(['git', 'show', '-s', '--format=%ct', 'HEAD'],
                                                       cwd=ROOT, text=True).strip(),
         'packages_installed': False, 'boot_files_written': False,
@@ -70,6 +70,32 @@ def prepare(output, release, jobs):
     }
     save(output / 'manifest.json', manifest)
     return manifest
+
+
+def record_packages(output, manifest, job):
+    verify_inputs(output, manifest)
+    actual = (output / 'kernel/src/linux-7.2.8/version').read_text().strip()
+    generated = (output / 'kernel/src/linux-7.2.8/include/config/kernel.release').read_text().strip()
+    if actual != manifest['expected_release'] or generated != actual:
+        raise RuntimeError('Built release differs from the staged candidate: ' + actual)
+    packages = sorted((output / 'packages').glob('*.pkg.tar.zst'))
+    if len(packages) != 2:
+        raise RuntimeError('Expected exactly a kernel and matching headers package')
+    names = set()
+    for path in packages:
+        info = subprocess.check_output(['bsdtar', '-xOf', str(path), '.PKGINFO'], text=True)
+        fields = dict(line.split(' = ', 1) for line in info.splitlines() if ' = ' in line)
+        if fields.get('pkgver') != f"7.2.8-{manifest['pkgrel']}" or fields.get('arch') != 'aarch64':
+            raise RuntimeError('Unexpected candidate package metadata: ' + path.name)
+        names.add(fields.get('pkgname'))
+    if names != {'linux-p16-platform', 'linux-p16-platform-headers'}:
+        raise RuntimeError('Candidate package names do not match kernel and headers')
+    manifest['packages'] = {
+        str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest() for p in packages
+    }
+    if not any(item.get('log') == job['log'] for item in manifest['attempts']):
+        manifest['attempts'].append(job)
+    save(output / 'manifest.json', manifest)
 
 
 def build(output, manifest):
@@ -80,7 +106,11 @@ def build(output, manifest):
     if job_path.exists():
         previous = json.loads(job_path.read_text())
         if previous['status'] == 'complete':
-            raise RuntimeError('Candidate already built; use its verified packages or stage a new candidate')
+            if previous.get('exit_code') != 0:
+                raise RuntimeError('Inconsistent completed candidate job')
+            record_packages(output, manifest, previous)
+            print('Verified the completed candidate packages; no build restarted', flush=True)
+            return
         if previous['status'] == 'running':
             started = process_start(previous['pid'])
             if started is not None and started == previous['process_start']:
@@ -127,19 +157,12 @@ def build(output, manifest):
     job.update({'status': 'complete' if code == 0 else 'failed',
                 'exit_code': code, 'finished_at': now()})
     save(job_path, job)
-    manifest['attempts'].append(job)
     verify_inputs(output, manifest)
     if code == 0:
-        actual = (output / 'kernel/src/linux-7.2.8/version').read_text().strip()
-        if actual != manifest['expected_release']:
-            raise RuntimeError('Built release differs from the staged candidate: ' + actual)
-        manifest['packages'] = {
-            str(p.relative_to(output)): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in sorted((output / 'packages').glob('*.pkg.tar.zst'))
-        }
-        if len(manifest['packages']) != 2:
-            raise RuntimeError('Expected exactly a kernel and matching headers package')
-    save(output / 'manifest.json', manifest)
+        record_packages(output, manifest, job)
+    else:
+        manifest['attempts'].append(job)
+        save(output / 'manifest.json', manifest)
     print(json.dumps(job), flush=True)
     if code:
         raise RuntimeError('Kernel build failed; inspect ' + str(log))

@@ -72,8 +72,8 @@ prerequisite callback returns caller 2's payload to caller 1; the fixed
 callback prevents replacement until caller 1 has copied its complete reply.
 The saved baseline is in `build/hid-target-20261106/`.
 
-The 124-test platform suite passes. The standalone package candidate
-`n1x-sensorhub-dkms 0.1.0-2` also builds without warnings for all five
+The platform suite and firmware/resource regression tests pass. The standalone package candidate
+`n1x-sensorhub-dkms 0.1.0-3` also builds without warnings for all five
 installed kernel headers; it changes reset diagnostics to debug level and
 is not installed. The live module remains package version `0.1.0-1`.
 Runtime lockdep on this target kernel and testing on other SPI HID hardware

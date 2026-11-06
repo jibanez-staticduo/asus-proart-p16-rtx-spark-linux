@@ -33,7 +33,6 @@ def reconstruct(directory):
 
 def without_input_quirk(source):
     source = source.replace('#include <linux/acpi.h>\n', '', 1)
-    source = source.replace('#include <linux/dmi.h>\n', '', 1)
     guard = ('\tif (shid->input_stream_only && rtype == HID_INPUT_REPORT)\n'
              '\t\treturn -EOPNOTSUPP;\n')
     if source.count(guard) != 1:
@@ -43,9 +42,12 @@ def without_input_quirk(source):
     end = source.index('static struct hid_ll_driver spi_hid_ll_driver =', start)
     source = source[:start] + source[end:]
     source = source.replace('\t.request = spi_hid_ll_request,\n', '', 1)
-    guard = ('\tshid->input_stream_only = dmi_match(DMI_PRODUCT_NAME, "ProArt P16 H7607BA") &&\n'
-             '\t\tACPI_COMPANION(dev) &&\n'
-             '\t\tacpi_dev_hid_uid_match(ACPI_COMPANION(dev), "MSFW1111", NULL);\n')
+    guard = ('\n\t/* This sensor controller supplies input through asynchronous DATA\n'
+             '\t * reports. Identify the controller, independent of the host system.\n'
+             '\t */\n'
+             '\tshid->input_stream_only = ACPI_COMPANION(dev) &&\n'
+             '\t\tacpi_dev_hid_uid_match(ACPI_COMPANION(dev), "MSFW1111", NULL) &&\n'
+             '\t\thid->vendor == 0 && hid->product == 0x0100;\n')
     if source.count(guard) != 1:
         raise RuntimeError('Device match changed; review the patch split')
     return source.replace(guard, '', 1)
@@ -100,12 +102,12 @@ def prepare(output):
         (tree / PREFIX / 'spi-hid-core.c').write_text(core)
         (tree / PREFIX / 'spi-hid-core.h').write_bytes(
             (ROOT / 'platform/sensorhub/spi-hid-core.h').read_bytes())
-        emit('0004-HID-spi-hid-handle-P16-stream-only-input-reports.patch',
-             'HID: spi-hid: handle P16 stream-only input reports',
-             'The P16 MSFW1111 sensor firmware sends input samples as DATA reports\n'
+        emit('0004-HID-spi-hid-handle-MSFW1111-stream-only-input-reports.patch',
+             'HID: spi-hid: handle MSFW1111 stream-only input reports',
+             'The MSFW1111 sensor controller (VID 0000, PID 0100) sends DATA reports\n'
              'and does not answer GET_INPUT_REPORT. Let the pending HID sensor read\n'
              'complete from its DATA report and reject synchronous raw input reads.\n'
-             'Restrict the behavior to the matching DMI product and ACPI device.')
+             'Match the controller ACPI ID and HID vendor/product, independent of the host.')
         for name in FILES:
             actual = (tree / PREFIX / name).read_bytes()
             if actual != (ROOT / 'platform/sensorhub' / name).read_bytes():

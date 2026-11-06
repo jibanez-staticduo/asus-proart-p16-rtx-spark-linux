@@ -15,7 +15,7 @@ DEST = ROOT / "platform/dsp/provider"
 
 def main():
     paths = subprocess.check_output(["git", "ls-files", "driver", "include"], cwd=NPU, text=True).splitlines()
-    paths.append("include/n1x_sroot_client.h")
+    paths.extend(("include/n1x_sroot_client.h", "include/n1x_sroot_firmware.h"))
     files = {}
     for name in sorted(set(paths)):
         path = NPU / name

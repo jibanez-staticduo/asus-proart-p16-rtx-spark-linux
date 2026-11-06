@@ -1,5 +1,9 @@
 # PCBI query service
 
+The transport binds to ACPI `NVDA8601`, checks revision 1 and maps the firmware
+register resources. No product-name, BIOS-version or fixed physical-base check
+is used.
+
 The PFI transport and the PCBI service protocol are separate layers. PFI
 channel status or a successful write does not establish PCBI request success.
 

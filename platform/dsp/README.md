@@ -1,6 +1,6 @@
 # Experimental MT8901 DSP boot
 
-The uninstalled `0.1.14-1` candidate implements the P16 route-2 playback
+The uninstalled `0.1.15-1` candidate implements MT8901 route-2 playback
 configuration chain: host task 7 and processing task 16. Processing IPC uses
 two AFE-owned 1 KiB SRAM slices, registered with commands 5 and 6 before OPEN.
 HWPARAM configures the task-7 host ring, task-16 hardware ring and task-16
@@ -16,6 +16,10 @@ stops requests after any firmware-stage failure. Normal close stops a started
 stream, then follows primary HWFREE/CLOSE with processing
 HWFREE/AFE-HWFREE/CLOSE; acknowledgements do not
 establish whole-core shutdown or permit memory release.
+
+Device matching and firmware/resource selection follow [the platform policy](../README.md).
+The driver accepts structurally valid signed containers without pinning their
+file hash or byte count; SROOT authenticates the firmware.
 
 This requires the matching `p16-afe-sram.patch` kernel candidate. Missing AFE
 helpers are rejected before processing registration. The native route-3 path

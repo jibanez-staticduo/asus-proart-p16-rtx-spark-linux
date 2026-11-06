@@ -16,14 +16,13 @@ spec.loader.exec_module(installer)
 
 class NPUServiceTests(unittest.TestCase):
     def prepare(self, root):
-        dmi = root / 'sys/class/dmi/id'
-        dmi.mkdir(parents=True)
-        for name, value in {'sys_vendor': 'ASUS', 'product_name': 'ProArt P16 H7607BA',
-                            'bios_version': 'H7607BA.300'}.items():
-            (dmi / name).write_text(value + '\n')
         (root / 'sys/module/n1x_npu_bootstrap').mkdir(parents=True)
         device = root / 'sys/bus/platform/devices/NVDA200A:00'
         device.mkdir(parents=True)
+        for hid in ('NVDA200A', 'NVDA8600'):
+            node = root / f'sys/bus/platform/devices/{hid}:00/firmware_node'
+            node.mkdir(parents=True)
+            (node / 'hid').write_text(hid + '\n')
         (device / 'shutdown').touch()
         debug = root / 'sys/kernel/debug/n1x-npu-bootstrap'
         debug.mkdir(parents=True)

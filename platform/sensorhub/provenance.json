@@ -22,5 +22,5 @@
       "sha256": "38a9db45b7d5a05842731c0c6e2304d72f2cbe42ad78cb9b3ce0c9cfedb6c3fc"
     }
   ],
-  "adaptation": "Evaluate _RST on the ACPI handle directly; the acpi_device dev has no companion fwnode for device_reset(). Respect HID_INPUT_REPORT versus HID_FEATURE_REPORT, handle GET_INPUT_REPORT_RESPONSE, and keep reply copying under the output mutex. P16-specific asynchronous .request handling: its VEML3328 task ignores GET_INPUT_REPORT, so IIO pending reads are fulfilled by DATA reports; raw synchronous input ioctls return EOPNOTSUPP."
+  "adaptation": "Evaluate _RST on the ACPI handle directly; the acpi_device dev has no companion fwnode for device_reset(). Respect HID_INPUT_REPORT versus HID_FEATURE_REPORT, handle GET_INPUT_REPORT_RESPONSE, and keep reply copying under the output mutex. MSFW1111/VID0000/PID0100 asynchronous .request handling: the VEML3328 task ignores GET_INPUT_REPORT, so IIO pending reads are fulfilled by DATA reports; raw synchronous input ioctls return EOPNOTSUPP."
 }

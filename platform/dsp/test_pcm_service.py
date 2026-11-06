@@ -41,6 +41,7 @@ typedef uint64_t dma_addr_t;typedef int spinlock_t;typedef int atomic_t;
 #define spin_unlock_irqrestore(lock,flags) ((void)(lock),(void)(flags))
 #define synchronize_irq(irq) ((void)(irq))
 #define U64_MAX UINT64_MAX
+#define DMA_BIT_MASK(n) ((1ULL<<(n))-1)
 #define GFP_KERNEL 0
 #define EXPORT_SYMBOL_GPL(name)
 #define cpu_to_le64(x) ((__le64)(x))
@@ -59,6 +60,7 @@ static pthread_mutex_t dev_mutex=PTHREAD_MUTEX_INITIALIZER,request_mutex=PTHREAD
 static unsigned dev_locked,request_locked,refs,allocations,symbol_refs,calls,publishes,ipc_publishes,barriers;
 static unsigned fail_at,bad_at,bad_field,missing_symbol,ipc_fault,ipc_releases;
 static int endpoint_error,publish_error,lock_error,afe_prepare_error;
+static u64 ipc_afe_base;
 static unsigned retirements;static unsigned afe_prepares,irq_prepares;static int irq_prepare_error;
 static bool ring_filled;static unsigned late_power_at;
 static u16 history[32];static u8 tasks[32];
@@ -98,7 +100,7 @@ struct mt8901_afe_sram_buffer *mt8901_afe_sram_reserve_ipc(struct mt8901_afe_sra
  if(ipc_fault==1)return ERR_PTR(-ENOMEM);memset(ipc_memory,0,sizeof(ipc_memory));return &messages;}
 int mt8901_afe_sram_view(struct mt8901_afe_sram_buffer *buffer,struct mt8901_afe_sram_view *value)
 {assert(buffer==&messages);if(ipc_fault==2)return -EIO;
- *value=(struct mt8901_afe_sram_view){.area=ipc_memory,.bytes=2048,.cpu_address=0x1a6c1000,.afe_address=0x1a6c1000,.dsp_address=0x4e5c1000};
+ *value=(struct mt8901_afe_sram_view){.area=ipc_memory,.bytes=2048,.cpu_address=0x1a6c1000,.afe_address=ipc_afe_base,.dsp_address=0x4e5c1000};
  if(ipc_fault==3)value->bytes--;if(ipc_fault==4)value->area=NULL;
  if(ipc_fault==5)value->afe_address=0x1a6c0000-1;if(ipc_fault==6)value->afe_address=0x1a6d4000-2047;return 0;}
 int mt8901_afe_sram_publish_ipc(struct mt8901_afe_sram_buffer *buffer)
@@ -140,7 +142,7 @@ static int n1x_adsp_transfer_locked(struct n1x_adsp *context,
   unsigned offset=(request->command-5)*1024;
   assert(request->channel==16 && request->data_mode==1 && request->parameter1==32 && request->payload);
   assert(messages.published && dsp.processing_messages==&messages && !lease.published);
-  assert(get64(request->payload)==0x1a6c1000+offset && get64(request->payload+8)==(uintptr_t)(ipc_memory+offset));
+  assert(get64(request->payload)==ipc_afe_base+offset && get64(request->payload+8)==(uintptr_t)(ipc_memory+offset));
   assert(get64(request->payload+16)==1024 && !get64(request->payload+24));
  }else if(request->data_mode==1){
   bool preparing=request->command==0x203 || request->command==3;
@@ -151,7 +153,7 @@ static int n1x_adsp_transfer_locked(struct n1x_adsp *context,
   assert(dsp.primary_pcm_attempted && dsp.primary_pcm_configured==preparing && !dsp.primary_pcm_prepared);
   assert(request->parameter1==8 && request->payload);
   const u8 *packet=request->channel==7?memory:ipc_memory;
-  assert(get64(request->payload)==(request->channel==7?dsp.dma:0x1a6c1000));
+  assert(get64(request->payload)==(request->channel==7?dsp.dma:ipc_afe_base));
   u64 base=request->channel==7?0xe0001000:0x1a6c0000;unsigned bytes=request->channel==7?7680:3840;
   assert(get64(packet)==base && get64(packet+8)==base+bytes && get64(packet+16)==base && get64(packet+24)==base);
   assert(get64(packet+32)==bytes && !get64(packet+40));
@@ -189,7 +191,7 @@ static void reset(void)
  endpoint_data=(struct mt8901_afe_sram_endpoint){.abi_version=2,
   .memory={.area=sram_memory,.bytes=3840,.cpu_address=0x1a6c0000,.afe_address=0x1a6c0000,.dsp_address=0x4e5c0000},
   .rate=48000,.channels=2,.sample_bits=16,.period_frames=480,.periods=2};
- calls=publishes=ipc_publishes=barriers=fail_at=bad_at=bad_field=missing_symbol=ipc_fault=ipc_releases=0;
+ ipc_afe_base=0x1a6c1000;calls=publishes=ipc_publishes=barriers=fail_at=bad_at=bad_field=missing_symbol=ipc_fault=ipc_releases=0;
  endpoint_error=publish_error=lock_error=afe_prepare_error=0;afe_prepares=irq_prepares=0;irq_prepare_error=0;ring_filled=false;late_power_at=0;retirements=0;
 }
 static void closed(void) {assert(retirements==(unsigned)lease.published && !dsp.primary_retire);assert(!refs && !allocations && !symbol_refs && !dev_locked && !request_locked);}
@@ -200,6 +202,9 @@ static void configure(struct n1x_adsp_primary *p)
  assert(dsp.primary_pcm_configured && dsp.processing_active && dsp.processing_messages==&messages && !symbol_refs);}
 int main(void)
 {
+ reset();ipc_afe_base=0x30001000;struct n1x_adsp_primary *relocated=open_primary();
+ configure(relocated);assert(dsp.processing_address==ipc_afe_base);
+ assert(!n1x_adsp_primary_close(relocated));closed();
  reset();struct n1x_adsp_primary *p=open_primary();configure(p);
  memset(memory+4096,0x5a,7680);ring_filled=true;
  assert(!n1x_adsp_primary_prepare_pcm(p) && calls==11 && dsp.primary_pcm_prepared && !symbol_refs);

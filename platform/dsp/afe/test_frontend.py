@@ -33,6 +33,7 @@ typedef uint8_t u8;typedef uint32_t u32;typedef uint64_t u64;typedef unsigned lo
 #define READ_ONCE(x) __atomic_load_n(&(x),__ATOMIC_SEQ_CST)
 #define WRITE_ONCE(x,v) __atomic_store_n(&(x),(v),__ATOMIC_SEQ_CST)
 #define min(a,b) ((a)<(b)?(a):(b))
+#define min_t(t,a,b) min((t)(a),(t)(b))
 #define ERR_PTR(e) ((void *)(intptr_t)(e))
 #define PTR_ERR(p) ((long)(intptr_t)(p))
 #define IS_ERR(p) ((uintptr_t)(p)>=(uintptr_t)-4095)
@@ -83,7 +84,7 @@ static unsigned cancel_calls,sync_irqs,last_commit,probes;
 static unsigned fail;static bool transfer_on_error;
 static int commit_error,start_error,stop_error,position_error;
 static struct n1x_adsp_pcm_position position_value;
-static struct device afe_dev={1},dsp_dev={2};static int platform_bus_type;
+static struct device afe_dev={1},dsp_dev={2};
 static unsigned char staging[3840],host[3840];
 struct n1x_adsp_primary {int unused;};static struct n1x_adsp_primary primary;
 struct mt8901_afe_sram_buffer {bool published;};static struct mt8901_afe_sram_buffer lease;
@@ -104,11 +105,12 @@ static snd_pcm_uframes_t bytes_to_frames(struct snd_pcm_runtime *r,size_t bytes)
 {return bytes/(r->channels*(r->sample_bits/8));}
 static size_t snd_pcm_lib_buffer_bytes(struct snd_pcm_substream *s)
 {return frames_to_bytes(s->runtime,s->runtime->buffer_size);}
+static size_t mt8901_afe_sram_size(struct mtk_base_afe *a) {assert(a==&afe);return 81920;}
 static void *allocate(size_t bytes) {void *p=calloc(1,bytes);assert(p);allocations++;return p;}
 #define kzalloc_obj(x) allocate(sizeof(x))
 static void kfree(void *p) {assert(p && allocations);allocations--;free(p);}
-static struct device *bus_find_device_by_name(void *bus,void *start,const char *name)
-{assert(bus==&platform_bus_type && !start && !strcmp(name,"NVDA8303:00"));if(fail==1)return NULL;device_refs++;return &dsp_dev;}
+static struct device *n1x_adsp_find_device(const char *name)
+{assert(!strcmp(name,"NVDA8303"));if(fail==1)return NULL;device_refs++;return &dsp_dev;}
 static void put_device(struct device *d) {assert(d==&dsp_dev && device_refs);device_refs--;}
 static void synchronize_irq(int irq) {assert(irq==77);sync_irqs++;}
 static void init_work(struct work_struct *w,void (*fn)(struct work_struct *)) {w->fn=fn;}

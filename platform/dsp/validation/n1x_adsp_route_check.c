@@ -2,17 +2,13 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/property.h>
+#include "n1x_adsp_client.h"
 
 static int n1x_adsp_sram_check(struct device *asd)
 {
-	static const struct {
-		const char *name;
-		u32 expected;
-	} properties[] = {
-		{"acpi-asd-sram-size", 0x14000},
-		{"acpi-asd-sram-cpu-view", 0x1a6c0000},
-		{"acpi-asd-sram-vad-view", 0x1a6c0000},
-		{"acpi-asd-sram-adsp-view", 0x4e5c0000},
+	static const char * const properties[] = {
+		"acpi-asd-sram-size", "acpi-asd-sram-cpu-view",
+		"acpi-asd-sram-vad-view", "acpi-asd-sram-adsp-view",
 	};
 	struct fwnode_handle *node;
 	u32 count, values[ARRAY_SIZE(properties)];
@@ -28,14 +24,19 @@ static int n1x_adsp_sram_check(struct device *asd)
 	if (!node)
 		return -ENODEV;
 	for (i = 0; i < ARRAY_SIZE(properties); i++) {
-		err = fwnode_property_read_u32(node, properties[i].name, &values[i]);
+		err = fwnode_property_read_u32(node, properties[i], &values[i]);
 		if (err)
 			goto put;
-		if (values[i] != properties[i].expected) {
+		if (!values[i] || !IS_ALIGNED(values[i], 16)) {
 			err = -ENODEV;
 			goto put;
 		}
 	}
+	for (i = 1; i < ARRAY_SIZE(values); i++)
+		if (values[0] - 1 > U32_MAX - values[i]) {
+			err = -ERANGE;
+			goto put;
+		}
 	dev_info(asd, "AFE SRAM properties checked: size=%#x cpu=%#x vad=%#x adsp=%#x\n",
 		 values[0], values[1], values[2], values[3]);
 put:
@@ -54,7 +55,7 @@ static int __init n1x_adsp_route_check_init(void)
 	unsigned int i;
 	int err;
 
-	asd = bus_find_device_by_name(&platform_bus_type, NULL, "NVDA9022:00");
+	asd = n1x_adsp_find_device("NVDA9022");
 	if (!asd)
 		return -ENODEV;
 	err = device_property_read_u32(asd, "acpi-asd-hw-ver", &version);
@@ -97,4 +98,4 @@ static void __exit n1x_adsp_route_check_exit(void)
 module_init(n1x_adsp_route_check_init);
 module_exit(n1x_adsp_route_check_exit);
 MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("P16 DSP firmware-route and SRAM-property validation; no firmware requests");
+MODULE_DESCRIPTION("MT8901 DSP firmware-route and SRAM-property validation; no firmware requests");

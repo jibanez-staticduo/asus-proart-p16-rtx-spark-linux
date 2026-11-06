@@ -1,10 +1,10 @@
-From dac879fb60524fa8fdfd8d824e7260762ed27353 Mon Sep 17 00:00:00 2001
+From c150ef72b56e9c6f5870657f57e75e0c8048aa72 Mon Sep 17 00:00:00 2001
 From: Johann-Peter Hartmann <johannhartmann@gmail.com>
 Date: Fri, 6 Nov 2026 11:36:38 +0100
-Subject: [PATCH RFC 0/4] HID: spi-hid: P16 reset and report-transaction fixes
+Subject: [PATCH RFC 0/4] HID: spi-hid: reset and sensor report-transaction fixes
 
 This draft fixes GPIO IRQ lookup, ACPI reset dispatch and GET-report
-transactions, and adds a stream-only input quirk for the P16 sensor hub.
+transactions, and adds a controller-ID quirk for the MSFW1111 sensor hub.
 
 The base is HID for-next commit 720806515cb6921ab05caaa6f470f7054b56385e.
 That base does not contain the SPI HID driver. The review branch imports
@@ -27,7 +27,7 @@ Validation:
 - ASan/UBSan tests of the actual request/transport callbacks, including
   deterministic concurrent raw requests. The baseline returns caller 2's
   bytes to caller 1; the fixed callbacks preserve both complete replies.
-- Five installed-kernel header builds and 124 platform tests pass.
+- Five installed-kernel header builds and 145 platform tests pass.
 
 The target kernel has not been booted on the P16. The installed transport
 has already provided live IIO readings with these functional fixes; the

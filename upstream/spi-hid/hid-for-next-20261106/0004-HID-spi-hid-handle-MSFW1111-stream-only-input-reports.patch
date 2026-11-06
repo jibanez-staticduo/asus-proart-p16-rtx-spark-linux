@@ -1,16 +1,22 @@
-Subject: [PATCH] HID: spi-hid: handle P16 stream-only input reports
+From c150ef72b56e9c6f5870657f57e75e0c8048aa72 Mon Sep 17 00:00:00 2001
+From: Johann-Peter Hartmann <johannhartmann@gmail.com>
+Date: Fri, 6 Nov 2026 11:32:58 +0100
+Subject: [PATCH RFC 4/4] HID: spi-hid: handle MSFW1111 stream-only input
+ reports
 
-The P16 MSFW1111 sensor firmware sends input samples as DATA reports
-and does not answer GET_INPUT_REPORT. Let the pending HID sensor read
-complete from its DATA report and reject synchronous raw input reads.
-Restrict the behavior to the matching DMI product and ACPI device.
+The MSFW1111 sensor controller with HID VID 0000 and PID 0100 sends input samples as DATA reports and does not answer GET_INPUT_REPORT. Complete pending HID sensor reads from DATA and reject synchronous raw input reads. Match the controller IDs independently of the host vendor and BIOS.
 
+Fixes: 0534d05f102e ("HID: spi-hid: add spi-hid driver HID layer")
 ---
+ drivers/hid/spi-hid/spi-hid-core.c | 32 ++++++++++++++++++++++++++++++
+ drivers/hid/spi-hid/spi-hid-core.h |  1 +
+ 2 files changed, 33 insertions(+)
+
 diff --git a/drivers/hid/spi-hid/spi-hid-core.c b/drivers/hid/spi-hid/spi-hid-core.c
-index a562b5e..98dd472 100644
+index a562b5e64..e92745eb0 100644
 --- a/drivers/hid/spi-hid/spi-hid-core.c
 +++ b/drivers/hid/spi-hid/spi-hid-core.c
-@@ -20,11 +20,13 @@
+@@ -20,6 +20,7 @@
   *  Copyright (c) 2006-2010 Jiri Kosina
   */
  
@@ -18,13 +24,21 @@ index a562b5e..98dd472 100644
  #include <linux/bitfield.h>
  #include <linux/cache.h>
  #include <linux/completion.h>
- #include <linux/crc32.h>
- #include <linux/device.h>
-+#include <linux/dmi.h>
- #include <linux/dmaengine.h>
- #include <linux/dma-mapping.h>
- #include <linux/err.h>
-@@ -1011,6 +1013,8 @@ static int spi_hid_get_request(struct spi_hid *shid, u8 content_id, u8 rtype,
+@@ -770,6 +771,13 @@ static int spi_hid_create_device(struct spi_hid *shid)
+ 	hid->vendor = shid->desc.vendor_id;
+ 	hid->product = shid->desc.product_id;
+ 
++	/* This sensor controller supplies input through asynchronous DATA
++	 * reports. Identify the controller, independent of the host system.
++	 */
++	shid->input_stream_only = ACPI_COMPANION(dev) &&
++		acpi_dev_hid_uid_match(ACPI_COMPANION(dev), "MSFW1111", NULL) &&
++		hid->vendor == 0 && hid->product == 0x0100;
++
+ 	snprintf(hid->name, sizeof(hid->name), "spi %04X:%04X",
+ 		 hid->vendor, hid->product);
+ 	strscpy(hid->phys, dev_name(&shid->spi->dev), sizeof(hid->phys));
+@@ -1011,6 +1019,8 @@ static int spi_hid_get_request(struct spi_hid *shid, u8 content_id, u8 rtype,
  	size_t content_len;
  	u8 expected;
  
@@ -33,7 +47,7 @@ index a562b5e..98dd472 100644
  	if (rtype == HID_FEATURE_REPORT) {
  		expected = GET_FEATURE_RESPONSE;
  	} else if (rtype == HID_INPUT_REPORT) {
-@@ -1404,6 +1408,27 @@ static int spi_hid_ll_output_report(struct hid_device *hid, __u8 *buf,
+@@ -1404,6 +1414,27 @@ static int spi_hid_ll_output_report(struct hid_device *hid, __u8 *buf,
  	return len;
  }
  
@@ -61,7 +75,7 @@ index a562b5e..98dd472 100644
  static struct hid_ll_driver spi_hid_ll_driver = {
  	.start = spi_hid_ll_start,
  	.stop = spi_hid_ll_stop,
-@@ -1413,6 +1438,7 @@ static struct hid_ll_driver spi_hid_ll_driver = {
+@@ -1413,6 +1444,7 @@ static struct hid_ll_driver spi_hid_ll_driver = {
  	.parse = spi_hid_ll_parse,
  	.output_report = spi_hid_ll_output_report,
  	.raw_request = spi_hid_ll_raw_request,
@@ -69,18 +83,8 @@ index a562b5e..98dd472 100644
  };
  
  static ssize_t bus_error_count_show(struct device *dev,
-@@ -1582,6 +1608,9 @@ int spi_hid_core_probe(struct spi_device *spi, struct spihid_ops *ops,
- 	shid->power_state = HIDSPI_ON;
- 	shid->ops = ops;
- 	shid->conf = conf;
-+	shid->input_stream_only = dmi_match(DMI_PRODUCT_NAME, "ProArt P16 H7607BA") &&
-+		ACPI_COMPANION(dev) &&
-+		acpi_dev_hid_uid_match(ACPI_COMPANION(dev), "MSFW1111", NULL);
- 	set_bit(SPI_HID_RESET_PENDING, &shid->flags);
- 	shid->is_panel_follower = drm_is_panel_follower(&spi->dev);
- 
 diff --git a/drivers/hid/spi-hid/spi-hid-core.h b/drivers/hid/spi-hid/spi-hid-core.h
-index ffe3e4b..071d238 100644
+index ffe3e4b23..071d238b7 100644
 --- a/drivers/hid/spi-hid/spi-hid-core.h
 +++ b/drivers/hid/spi-hid/spi-hid-core.h
 @@ -44,6 +44,7 @@ struct spi_hid_device_descriptor {
@@ -91,3 +95,6 @@ index ffe3e4b..071d238 100644
  	struct spi_device	*spi;	/* spi device. */
  	struct hid_device	*hid;	/* pointer to corresponding HID dev. */
  
+-- 
+2.56.0
+
