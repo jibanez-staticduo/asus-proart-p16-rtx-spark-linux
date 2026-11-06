@@ -14,6 +14,7 @@ FILES = {
     'config/00-omarchy-n1x-usb4.conf': '/etc/limine-entry-tool.d/00-omarchy-n1x-usb4.conf',
     'config/00-omarchy-n1x-gpu.conf': '/etc/limine-entry-tool.d/00-omarchy-n1x-gpu.conf',
     'config/00-omarchy-n1x-sleep.conf': '/etc/limine-entry-tool.d/00-omarchy-n1x-sleep.conf',
+    'config/zz-p16-clean-menu.conf': '/etc/limine-entry-tool.d/zz-p16-clean-menu.conf',
     'scripts/p16-charge-limit': '/usr/local/libexec/p16-charge-limit',
     'scripts/p16-temperatures': '/usr/local/bin/p16-temperatures',
     'config/p16-asus-controls.service': '/etc/systemd/system/p16-asus-controls.service',

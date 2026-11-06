@@ -21,11 +21,28 @@ verify() {
     grep -q ' n1x_sroot_upload_dsp_v1[[:space:]]*\[n1x_npu_bootstrap\]' /proc/kallsyms || fail 'SROOT export missing'
     [[ -c /dev/accel/accel0 ]] || fail 'Accelerator device missing'
 }
+stop() {
+    [[ -d /sys/module/n1x_npu_bootstrap ]] || return 0
+    local device=/sys/bus/platform/devices/NVDA200A:00
+    local status=/sys/kernel/debug/n1x-npu-bootstrap/shutdown_status key
+    # The kernel serializes this with submissions and DSP publication. It
+    # refuses failed channels and published DSP buffers without releasing DMA.
+    [[ -w $device/shutdown ]] || fail 'Checked shutdown interface missing; module retained'
+    printf 'stop\n' > "$device/shutdown" || fail 'Checked shutdown refused; module retained'
+    for key in hardware_off released; do
+        grep -Eq "(^|[[:space:]])$key=1([[:space:]]|$)" "$status" || fail "Shutdown incomplete: $key; module retained"
+    done
+    for key in error hfrp_held upload_held; do
+        grep -Eq "(^|[[:space:]])$key=0([[:space:]]|$)" "$status" || fail "Shutdown failed: $key; module retained"
+    done
+    modprobe -r n1x_npu_bootstrap
+}
 case ${1:-} in
     --check-host) exit 0 ;;
     --verify) verify; exit 0 ;;
+    --stop) stop; exit 0 ;;
     --prepare) ;;
-    *) fail 'Usage: n1x-platform-npu-start --check-host|--prepare|--verify' ;;
+    *) fail 'Usage: n1x-platform-npu-start --check-host|--prepare|--verify|--stop' ;;
 esac
 bound=0
 for name in NVDA200A:00 NVDA8600:00; do

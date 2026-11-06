@@ -7,14 +7,62 @@ import tempfile
 ROOT = Path(__file__).resolve().parent
 
 
+def test_remove(source):
+    remove = source[source.index('static void n1x_adsp_remove('):
+                    source.index('static int n1x_adsp_runtime_suspend(')]
+    harness = r'''
+#include <assert.h>
+#include <stdbool.h>
+#include <errno.h>
+struct device {int unused;};
+struct work_struct {bool pending;};
+struct n1x_adsp {int irq;struct work_struct power_work;void *pwrap;};
+struct platform_device {struct device dev;};
+static struct platform_device pdev;
+static struct n1x_adsp dsp;
+static int step,resume_result;
+static struct n1x_adsp *platform_get_drvdata(struct platform_device *p)
+{assert(p==&pdev);return &dsp;}
+static void devm_free_irq(struct device *dev,int irq,void *data)
+{assert(dev==&pdev.dev && irq==234 && data==&dsp && step++==0);}
+static void cancel_work_sync(struct work_struct *work)
+{assert(work==&dsp.power_work && step++==1);work->pending=false;}
+static int pm_runtime_resume_and_get(struct device *dev)
+{assert(dev==&pdev.dev && !dsp.power_work.pending && step++==2);return resume_result;}
+static void pm_runtime_dont_use_autosuspend(struct device *dev)
+{assert(dev==&pdev.dev && step++==3);}
+static void pm_runtime_disable(struct device *dev)
+{assert(dev==&pdev.dev && step++==4);}
+static void mtk_pwrap_dev_remove(void *p)
+{assert(p==&dsp && step++==5);}
+static void pm_runtime_put_noidle(struct device *dev)
+{assert(dev==&pdev.dev && step++==6 && resume_result>=0);}
+''' + remove + r'''
+int main(void)
+{
+ for(unsigned fail=0;fail<2;fail++) {
+  step=0;resume_result=fail?-EIO:0;dsp.irq=234;dsp.pwrap=&dsp;dsp.power_work.pending=true;
+  n1x_adsp_remove(&pdev);assert(step==(fail?6:7));
+ }
+}
+'''
+    with tempfile.TemporaryDirectory() as temporary:
+        code, binary = Path(temporary) / 'remove.c', Path(temporary) / 'remove'
+        code.write_text(harness)
+        subprocess.run(['cc', '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+                        '-fsanitize=address,undefined', '-g', str(code), '-o', str(binary)], check=True)
+        subprocess.run([str(binary)], check=True)
+
+
 def main():
     source = (ROOT / 'n1x_adsp.c').read_text()
     state = source[source.index('struct n1x_adsp_target {'):source.index('static int n1x_adsp_group_member(')]
-    handlers = source[source.index('static irqreturn_t n1x_adsp_irq('):source.index('static ssize_t boot_store(')]
+    handlers = source[source.index('static void n1x_adsp_power_work('):source.index('static ssize_t boot_store(')]
     harness = r'''
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -42,6 +90,25 @@ typedef int irqreturn_t;
 #define lower_32_bits(n) ((u32)(n))
 #define msecs_to_jiffies(n) (n)
 #define dev_info(...) ((void)0)
+#define dev_err(...) ((void)0)
+#define dev_err_ratelimited(...) ((void)0)
+typedef int atomic_t;
+typedef int spinlock_t;
+struct work_struct {bool pending;};
+struct mock_fifo {u32 data[16];unsigned head,tail,count;};
+#define DECLARE_KFIFO(name,type,size) struct mock_fifo name
+#define container_of(ptr,type,member) ((type *)((char *)(ptr)-offsetof(type,member)))
+static int atomic_read(atomic_t *p) {return *p;}
+static void atomic_inc(atomic_t *p) {++*p;}
+static int atomic_cmpxchg(atomic_t *p,int old,int value) {int before=*p;if(before==old)*p=value;return before;}
+static int schedule_work(struct work_struct *work) {work->pending=true;return 1;}
+static unsigned kfifo_in_spinlocked(struct mock_fifo *fifo,const u32 *value,unsigned count,spinlock_t *lock)
+{(void)lock;assert(count==1);if(fifo->count==16)return 0;fifo->data[fifo->head++%16]=*value;fifo->count++;return 1;}
+static unsigned kfifo_out_spinlocked(struct mock_fifo *fifo,u32 *value,unsigned count,spinlock_t *lock)
+{(void)lock;assert(count==1);if(!fifo->count)return 0;*value=fifo->data[fifo->tail++%16];fifo->count--;return 1;}
+struct power_cntl_scmi_data {u8 requestId;u32 customdata[3];};
+struct _power_cntrl_request {struct device *dev;void *InBuffer;size_t InBufferSize;
+ void *OutBuffer;size_t OutBufferSize,BytesReturned;};
 struct device_driver { const char *name; };
 struct device { struct device_driver *driver; } device;
 struct completion { bool done; };
@@ -104,6 +171,18 @@ static unsigned long wait_for_completion_timeout(struct completion *c,unsigned l
  assert(ticks==30000);waits++;return c->done?1:0;
 }
 static int upload_stub(u32 id,const u8 *image,size_t bytes,struct n1x_sroot_client_result *result);
+static int power_calls,power_reply,in_irq;
+static u32 power_value,power_values[16];
+static int mtk_send_power_control_req(struct _power_cntrl_request *request)
+{
+ struct power_cntl_scmi_data *data=request->InBuffer;
+ assert(!in_irq && request->dev==&device && request->InBufferSize==16);
+ assert(!request->OutBuffer && !request->OutBufferSize && !request->BytesReturned);
+ assert(data->requestId==0 && data->customdata[0]==1 && data->customdata[2]==0);
+ assert(power_calls<16);power_values[power_calls++]=data->customdata[1];
+ power_value=data->customdata[1];return power_reply;
+}
+static u32 get_unaligned_le32(const u8 *p) {return (u32)p[0]|(u32)p[1]<<8|(u32)p[2]<<16|(u32)p[3]<<24;}
 static typeof(n1x_sroot_upload_dsp_v1) *get_provider(void) {if(!provider)return NULL;symbol_refs++;return upload_stub;}
 static void put_provider(void) {assert(symbol_refs==1);symbol_refs--;}
 #define symbol_get(name) get_provider()
@@ -129,8 +208,17 @@ static void reset(void) {
  free(allocation);allocation=NULL;memset(&dsp,0,sizeof(dsp));
  memset(shared_memory,0,sizeof(shared_memory));memset(mailbox_memory,0,sizeof(mailbox_memory));
  enable_boot=privileged=provider=valid_hash=true;fault=reads=writes=pm_refs=module_refs=symbol_refs=uploads=frees=waits=0;
+ power_calls=power_reply=in_irq=0;power_value=0;
  dsp.dev=&device;dsp.target=&targets[0];dsp.shared=shared_memory;dsp.mailbox=mailbox_memory;
  firmware.size=sizeof(firmware_bytes);
+}
+static void power_notification(unsigned type,u32 value)
+{
+ u8 *packet=(u8 *)shared_memory+ADSP_RX_OFFSET;
+ packet[19]=type<<4;packet[22]=5;packet[23]=0xf0;
+ for(unsigned i=0;i<4;i++)packet[24+i]=value>>(8*i);
+ mailbox_memory[ADSP_OUT_STATUS/4]=8;
+ in_irq=1;assert(n1x_adsp_irq(0,&dsp)==IRQ_HANDLED);in_irq=0;
 }
 int main(void) {
  for(int f=1;f<=12;f++) {
@@ -154,7 +242,28 @@ int main(void) {
   assert(n1x_adsp_boot(&dsp)<0);assert(!reads && !writes && !pm_refs && !module_refs && !symbol_refs);
  }
  reset();assert(n1x_adsp_irq(0,&dsp)==IRQ_NONE && !reads && !writes);
- reset();puts("DSP boot/IRQ guards, DMA retention, notification class and no-retry checks passed");
+ reset();assert(!n1x_adsp_boot(&dsp));power_notification(2,0x78563412);
+ assert(dsp.power_work.pending && dsp.power_queued==1 && !dsp.power_completed && !power_calls);
+ dsp.power_work.pending=false;n1x_adsp_power_work(&dsp.power_work);
+ assert(power_calls==1 && power_value==0x78563412 && dsp.power_completed==1 && !dsp.power_error);
+ /* Wrong notification class must never submit an SSPM request. */
+ reset();assert(!n1x_adsp_boot(&dsp));power_notification(0,7);
+ assert(!dsp.power_queued && !dsp.power_work.pending && !power_calls);
+ /* Preserve order; only the worker performs the sleeping operation. */
+ reset();assert(!n1x_adsp_boot(&dsp));power_notification(2,1);power_notification(2,2);
+ assert(!power_calls);n1x_adsp_power_work(&dsp.power_work);
+ assert(power_calls==2 && power_values[0]==1 && power_values[1]==2 && dsp.power_completed==2);
+ /* A failed SSPM operation is terminal; later notifications cannot retry it. */
+ reset();assert(!n1x_adsp_boot(&dsp));power_notification(2,3);power_notification(2,4);
+ power_reply=-EIO;n1x_adsp_power_work(&dsp.power_work);
+ assert(power_calls==1 && power_value==3 && dsp.power_error==-EIO && !dsp.power_completed);
+ power_notification(2,5);n1x_adsp_power_work(&dsp.power_work);
+ assert(power_calls==1 && dsp.power_queued==2 && dsp.power_error==-EIO);
+ /* Overflow never overwrites a queued request or starts more power operations. */
+ reset();assert(!n1x_adsp_boot(&dsp));for(unsigned i=0;i<17;i++)power_notification(2,i);
+ assert(dsp.power_queued==16 && dsp.power_requests.count==16 && dsp.power_error==-ENOSPC);
+ n1x_adsp_power_work(&dsp.power_work);assert(!power_calls);
+ reset();puts("DSP boot/IRQ, power requests, bounded queues and DMA lifetime tests passed");
 }
 '''
     with tempfile.TemporaryDirectory() as temporary:
@@ -165,6 +274,7 @@ int main(void) {
                         '-fsanitize=address,undefined', '-g', '-I' + str(ROOT),
                         str(code), '-o', str(binary)], check=True)
         subprocess.run([str(binary)], check=True)
+    test_remove(source)
 
 
 if __name__ == '__main__':

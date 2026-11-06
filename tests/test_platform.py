@@ -670,6 +670,51 @@ class OEMExtractionTests(unittest.TestCase):
         self.assertFalse(receipt["windows_code_executed"])
         self.assertEqual(receipt["files"], self.lock["files"])
 
+    def add_input(self):
+        relative = 'Windows/System32/DriverStore/FileRepository/audio/audio.sys'
+        data = b'additional verified driver fixture'
+        self.lock['iso_path'] = 'recovery.iso'
+        self.lock['files'].append({'path': relative, 'bytes': len(data),
+                                   'sha256': hashlib.sha256(data).hexdigest()})
+        return relative, data
+
+    def extract_addition(self, relative, data):
+        def capture(command, destination):
+            destination.write_bytes(b'synthetic archive')
+
+        def run(command, **kwargs):
+            if command[0] == 'wimextract':
+                self.assertIn('/' + str(Path(relative).parent), command)
+                self.assertNotIn('/' + str(Path(self.relative).parent), command)
+                dest = Path(next(arg.split('=', 1)[1] for arg in command
+                                 if arg.startswith('--dest-dir=')))
+                target = dest / relative
+                target.parent.mkdir(parents=True)
+                target.write_bytes(data)
+
+        with patch.object(extractor, 'capture', side_effect=capture), \
+             patch.object(extractor.subprocess, 'run', side_effect=run):
+            return extractor.extract(self.vendor, self.lock, self.spec)
+
+    def test_new_pinned_inputs_extend_an_existing_cache_without_replacing_files(self):
+        relative, data = self.add_input()
+        before = self.file.stat()
+        result = self.extract_addition(relative, data)
+        self.assertEqual((self.vendor / 'platform-drivers' / relative).read_bytes(), data)
+        self.assertEqual(self.file.stat().st_ino, before.st_ino)
+        self.assertEqual(self.file.stat().st_mtime_ns, before.st_mtime_ns)
+        self.assertFalse(result['windows_code_executed'])
+        self.assertEqual(len(result['files']), 2)
+
+    def test_bad_addition_is_rejected_before_publication(self):
+        relative, data = self.add_input()
+        before = self.file.read_bytes()
+        with self.assertRaises(ValueError):
+            self.extract_addition(relative, data + b'corrupt')
+        self.assertEqual(self.file.read_bytes(), before)
+        self.assertFalse((self.vendor / 'platform-drivers' / relative).exists())
+        self.assertFalse((self.vendor / 'platform-drivers.receipt.json').exists())
+
     def test_manifest_cannot_escape_the_extracted_tree(self):
         for relative in ("../outside", "/etc/passwd"):
             with self.subTest(relative=relative):

@@ -85,3 +85,25 @@ The native driver validates hardware/firmware; there is no kernel-version
 allowlist. Enable the new unit and disable the old `n1x-npu.service` without
 stopping a published experiment. Normal startup leaves DSP firmware boot disabled.
 See `docs/update-safe.md` for the kernel packaging and pacman/mkinitcpio flow.
+
+## Firmware power notifications
+
+The 0.1.1 candidate also handles notification-class `0xf005` packets. The OEM
+notification worker reads a little-endian 32-bit value at packet offset 24,
+then submits a 16-byte power-control request with request ID zero and data
+words `{1, value, 0}`. That layout maps to Linux's
+`power_cntl_scmi_data` and `mtk_send_power_control_req()`; the exact OEM functions
+and the distinction between source evidence and hardware validation are in
+`provenance.json`.
+
+The interrupt handler queues each value in a fixed 16-entry FIFO. A workqueue
+submits SSPM requests in order, outside interrupt context. Queue overflow or
+an SSPM failure stops further submissions for that instance. The driver never
+retries an uncertain power operation. Removal synchronizes and detaches the
+IRQ before cancelling work and releasing power state. Status includes queued
+and completed request counts and the first power error.
+
+Fault tests cover message classification, the exact Linux request payload,
+FIFO order, overflow, terminal errors and removal order. This path has not yet
+been tested against running DSP firmware. It does not implement audio/compute
+services or establish a DSP shutdown protocol; firmware boot remains opt-in.

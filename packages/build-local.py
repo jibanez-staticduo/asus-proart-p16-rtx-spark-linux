@@ -24,6 +24,7 @@ PLATFORM = [
     '/etc/limine-entry-tool.d/00-omarchy-n1x-sleep.conf',
     '/etc/limine-entry-tool.d/00-omarchy-n1x-usb4.conf',
     '/etc/limine-entry-tool.d/zz-p16-keyboard.conf',
+    '/etc/limine-entry-tool.d/zz-p16-clean-menu.conf',
     '/etc/modprobe.d/nvidia.conf',
     '/etc/modprobe.d/omarchy-n1x-nvidiafb.conf',
     '/etc/systemd/system/p16-asus-controls.service',
@@ -64,6 +65,7 @@ SOURCES = {
     '/etc/pacman.d/hooks/00-p16-guard-preflight.hook': REPO / 'config/00-p16-guard-preflight.hook',
     '/etc/pacman.d/hooks/zz-p16-boot-menu.hook': REPO / 'config/zz-p16-boot-menu.hook',
     '/etc/initcpio/install/p16-acpi': REPO / 'config/p16-acpi',
+    '/etc/limine-entry-tool.d/zz-p16-clean-menu.conf': REPO / 'config/zz-p16-clean-menu.conf',
     '/etc/mkinitcpio.conf.d/zz-p16-hardware-fixes.conf': REPO / 'config/zz-p16-hardware-fixes.conf',
     '/etc/pacman.d/hooks/95-p16-platform-update-check.hook': REPO / 'config/95-p16-platform-update-check.hook',
     '/usr/local/sbin/p16-platform-update-check': REPO / 'scripts/p16-platform-update-check',
@@ -104,7 +106,7 @@ def snapshot(name, paths):
         tar.add(payload, arcname='payload')
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     backup = ' '.join(f"'{path.lstrip('/')}" + "'" for path in paths if path.startswith('/etc/'))
-    version = '1.1.3' if name == 'p16-platform-policy' else '1.0.0'
+    version = '1.1.5' if name == 'p16-platform-policy' else '1.0.0'
     dependencies = "depends=('bash' 'dkms' 'mkinitcpio' 'binutils' 'n1x-sroot-provider-dkms>=0.1.0-3')" if name == 'p16-platform-policy' else ''
     (directory / 'PKGBUILD').write_text(f'''pkgname={name}
 pkgver={version}

@@ -168,7 +168,8 @@ def main():
             item = snapshot[device]["status"]
             report["boot_trials"][device] = item
             if any(item.get(key) != "1" for key in ("published", "loader_published", "loader_accepted", "ready")) or \
-                    item.get("error") != "0" or int(item.get("image", "0"), 0) != image_id:
+                    item.get("error") != "0" or item.get("power_error", "0") != "0" or \
+                    int(item.get("image", "0"), 0) != image_id:
                 raise RuntimeError("DSP boot/ready not confirmed; no retry or reset")
             new_messages = live.new_kernel_messages(messages)
             live.check_kernel_messages(new_messages)

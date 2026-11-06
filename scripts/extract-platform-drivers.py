@@ -4,6 +4,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -42,9 +43,20 @@ def extract(vendor, lock, recovery_spec):
     recovery = vendor / lock["recovery"]
     verify(recovery, recovery_spec)
     destination = vendor / "platform-drivers"
+    missing = []
     if destination.exists():
-        validate_tree(destination, lock["files"])
+        for spec in lock['files']:
+            relative = Path(spec['path'])
+            if relative.is_absolute() or '..' in relative.parts:
+                raise ValueError(f'Unsafe manifest path: {relative}')
+            target = destination / relative
+            if target.exists() or target.is_symlink():
+                verify(target, spec)
+            else:
+                missing.append(spec)
     else:
+        missing = lock['files']
+    if missing:
         # Keep all generated paths private until every selected file matches.
         with tempfile.TemporaryDirectory(prefix=".platform-extract-", dir=vendor) as temporary:
             work = Path(temporary)
@@ -56,18 +68,31 @@ def extract(vendor, lock, recovery_spec):
             wim = work / "boot.wim"
             capture(["7z", "x", "-so", str(iso), "sources/boot.wim"], wim)
             staged = work / "drivers"
-            packages = sorted({str(Path(spec["path"]).parent) for spec in lock["files"]})
+            packages = sorted({str(Path(spec["path"]).parent) for spec in missing})
             subprocess.run(["wimextract", str(wim), "1", *["/" + p for p in packages],
                             "--dest-dir=" + str(staged), "--preserve-dir-structure", "--no-acls"],
                            check=True)
-            validate_tree(staged, lock["files"])
+            validate_tree(staged, missing)
             # Publish only selected, verified files, not unrelated recovery data.
             selected = work / "selected"
-            for spec in lock["files"]:
+            for spec in missing:
                 target = selected / spec["path"]
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(staged / spec["path"], target)
-            selected.rename(destination)
+            if not destination.exists():
+                selected.rename(destination)
+            else:
+                # Publish additions without replacing a previously verified file.
+                # Temporary files share the destination filesystem; link creation
+                # is atomic and an existing target is revalidated, never replaced.
+                for spec in missing:
+                    target = destination / spec['path']
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        os.link(selected / spec['path'], target)
+                    except FileExistsError:
+                        verify(target, spec)
+    validate_tree(destination, lock['files'])
     receipt = {"schema": 1, "recovery_sha256": recovery_spec["sha256"],
                "files": lock["files"], "windows_code_executed": False}
     (vendor / "platform-drivers.receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")

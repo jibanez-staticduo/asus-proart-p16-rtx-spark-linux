@@ -38,6 +38,8 @@ ACPI overrides are generated from the target machine's own firmware tables.
 
 For the installed machine's package-owned customization and boot-image update
 policy, see [Update-safe P16 installation](docs/update-safe.md).
+The [platform driver status](docs/platform-driver-status.md) separates current
+interfaces and hardware results from unfinished service and lifecycle work.
 
 The experimental SCP driver in `platform/scp` now reads the running firmware's
 log and sends bounded version/sensor-descriptor queries. It is gated to the

@@ -16,26 +16,26 @@ PACKAGES = {"n1x-scp-dkms": "n1x_scp", "n1x-pluton-dkms": "n1x_pluton",
             "n1x-adsp-firmware-local": None}
 
 
-def npu_initramfs_audit():
+def npu_initramfs_audit(boot_root=Path('/boot')):
     path = Path(__file__).with_name("verify-boot.py")
     spec = importlib.util.spec_from_file_location("late_boot_verify", path)
     verify = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(verify)
     checked = []
     with tempfile.TemporaryDirectory(prefix="p16-provider-initrd-") as directory:
-        for image in sorted(Path("/boot/EFI/Linux").glob("*.efi")):
+        for image in sorted((boot_root / 'EFI/Linux').glob('*.efi')):
             sections = verify.sections(image)
             release = sections.get(".uname", b"").rstrip(b"\0\n").decode()
-            if release not in ("7.2.8-23-omarchy-p16-asus-npu2", "7.2.8-23-rtx-spark-npu"):
-                continue
+            if not re.fullmatch(r'[a-zA-Z0-9._+-]+', release):
+                raise RuntimeError('Missing or invalid UKI kernel release: ' + str(image))
             initrd = Path(directory) / "initrd"
             initrd.write_bytes(sections[".initrd"])
             listing = subprocess.check_output(["lsinitcpio", str(initrd)], text=True)
             if re.search(r"(?:^|/)(?:n1x_npu_bootstrap|n1x-npu-bootstrap)\.ko(?:\.(?:zst|xz|gz))?$", listing, re.M):
                 raise RuntimeError("NPU is embedded in this UKI; stage an explicit image update before provider installation: " + str(image))
             checked.append(str(image))
-    if len(checked) != 2:
-        raise RuntimeError("Expected both current and RTX NPU UKIs for late-provider validation")
+    if not checked:
+        raise RuntimeError('No Linux UKIs found for late-provider validation')
     return checked
 
 
@@ -108,7 +108,7 @@ def main():
                                capture_output=True, text=True)
                 subprocess.run(["systemctl", "enable", "n1x-platform-npu.service"], check=True,
                                capture_output=True, text=True)
-                subprocess.run(["/usr/libexec/n1x-platform-npu-start", "--prepare"], check=True,
+                subprocess.run(["/usr/libexec/n1x-platform-npu-start", "--check-host"], check=True,
                                capture_output=True, text=True)
                 receipt["provider_service_verified_without_restart"] = True
                 receipt["npu_service"] = "n1x-platform-npu.service"

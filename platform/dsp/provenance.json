@@ -1,8 +1,12 @@
 {
   "schema": 1,
-  "target": {"product": "ProArt P16 H7607BA", "bios": "H7607BA.300"},
+  "target": {
+    "product": "ProArt P16 H7607BA",
+    "bios": "H7607BA.300"
+  },
   "oem": {
-    "driver": "nvadsp.sys", "version": "2.13.0.1",
+    "driver": "nvadsp.sys",
+    "version": "2.13.0.1",
     "sha256": "8b21e4652bb0ac178a2c470c8d6f982155e715c46112ac3b93de3ebfe00b13d6",
     "sroot_driver": "nvsrootmbx.sys",
     "sroot_sha256": "f814e861b5e076aa4e00619a8a588df3c4ae9ec2b5026c30748ba493ce0e6d8a",
@@ -18,7 +22,9 @@
       "receive_copy_and_release": "FUN_140005400",
       "notification_class": "FUN_140005980; byte 19 high nibble 2",
       "ready_notification": "FUN_140006220; u16 offset 22 == 0xf002",
-      "sroot_image_upload": "nvsrootmbx FUN_140031c98; command 0x18"
+      "sroot_image_upload": "nvsrootmbx FUN_140031c98; command 0x18",
+      "power_notification": "FUN_140006220: class 2, command 0xf005, little-endian u32 at packet offset 24",
+      "power_notification_worker": "FUN_140006a70 -> FUN_14004fb38: 16-byte PoFxPowerControl input; u8 request ID 0, u32 words at offsets 4/8/12 = 1/value/0"
     }
   },
   "linux_power_reference": {
@@ -46,5 +52,16 @@
     "boot_evidence": "n1x-lab/results/platform-enablement-20261105/dsp-boot-trial-2.json",
     "sram_preflight": "two read-only power-cycle observations showed changing, nonzero config words outside the valid DMA-window ABI; preserve pending notifications and valid existing DMA descriptors",
     "reboot_verified": false
+  },
+  "firmware_power_requests": {
+    "linux_api": "mtk_send_power_control_req",
+    "linux_header": "include/linux/soc/mediatek/mtk-pwrap.h",
+    "mapping": "power_cntl_scmi_data: requestId=0; customdata={1, firmware_value, 0}",
+    "evidence": "OEM input layout and Linux API layout match; equivalence on DSP firmware remains to be validated",
+    "queue_entries": 16,
+    "execution_context": "workqueue; no sleeping SSPM request in the interrupt handler",
+    "error_policy": "record first error and stop further power submissions; no automatic retry",
+    "hardware_validated": false,
+    "tests": "test_driver.py: actual C worker/IRQ and remove callbacks with fault-injected OS/API edges"
   }
 }

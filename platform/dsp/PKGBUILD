@@ -1,6 +1,6 @@
 pkgname=n1x-adsp-dkms
-pkgver=0.1.0
-pkgrel=2
+pkgver=0.1.1
+pkgrel=1
 pkgdesc='Experimental P16 MT8901 DSP secure-boot driver; firmware boot disabled'
 arch=('aarch64')
 url='https://github.com/johannhartmann/asus-proart-p16-rtx-spark-linux'
@@ -11,14 +11,14 @@ optdepends=('n1x-sroot-provider-dkms: serialized SROOT upload API'
 checkdepends=('python' 'gcc')
 source=('n1x_adsp.c' 'n1x_sroot_client.h' 'Kbuild' 'dkms.conf'
         'n1x-adsp.conf' 'provenance.json' 'README.md' 'test_driver.py')
-sha256sums=('bf87ede132c8f51d0ed53e2712132a6b428a4c88d81c0f1754445e7f027e78e2'
+sha256sums=('0701b7aa4ee4322c00bea62d2bc51c514f55afef9c897b8e93fb9554de96af03'
             '97a563951b1d981b3a14f525f7bad0eaf33fe485a1f9352beb30af95148960f9'
             '230086b8afc95aea40727de3a89c05228cd79b78854e8973eefb06b65d740c02'
-            'f2dc9530d03e6f0feb6f88815493aa79f6ba5866a7c01727798920ca89d9848b'
+            'b192d6d3d25128169e67b1a370cb2903776d0e6ac3df6f7c377bbdd8229f40ed'
             '8beebbc715402c0bbea8120cbc29f2c601ade0c89589403d8aef6cc88cb56e36'
-            'eef9440ccdb9cbc6d7a6b3e8752316e2af728dc40dff528e7e0229a916cb5d93'
-            '47498eb83c7e8f119531b797e1c652d69efa16fa4b2fd63d4c22e37d5ccb0ba9'
-            'b4b4968ff008d10d92b739fcfd733346262070f2df33ace05e28c90e0dadc201')
+            'a890ddd40d7a85561753443cae7c737dc1bcfc2c3614388d05a807c4fbf82441'
+            'eacec6d41a90050a5bf63184dbcdb49de06e8eacef86fa1ea85b3a9dfe1ce3c3'
+            'f6676ac8fd7d2a4cf387920719f8afb83296cc2a45a67c6ad70a58ac507eb2b7')
 
 check() {
   cd "$srcdir"

@@ -6,6 +6,7 @@
  */
 #include <crypto/sha2.h>
 #include <linux/acpi.h>
+#include <linux/atomic.h>
 #include <linux/capability.h>
 #include <linux/completion.h>
 #include <linux/dma-map-ops.h>
@@ -17,12 +18,15 @@
 #include <linux/io.h>
 #include <linux/iommu.h>
 #include <linux/iommu-dma.h>
+#include <linux/kfifo.h>
 #include <linux/module.h>
 #include <linux/mutex.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
 #include <linux/soc/mediatek/mtk-pwrap.h>
+#include <linux/spinlock.h>
 #include <linux/unaligned.h>
+#include <linux/workqueue.h>
 #include "n1x_sroot_client.h"
 
 #define ADSP_RX_OFFSET 0x20
@@ -61,9 +65,13 @@ struct n1x_adsp {
 	struct mutex lock;
 	struct completion ready;
 	struct n1x_sroot_client_result loader;
+	struct work_struct power_work;
+	spinlock_t power_lock;
+	DECLARE_KFIFO(power_requests, u32, 16);
+	atomic_t power_queued, power_completed, power_error;
 	u32 notifications;
 	u16 last_command;
-	int error;
+	int error, irq;
 	bool attempted, published, boot_ready;
 };
 
@@ -93,11 +101,42 @@ static int n1x_adsp_dma_gate(struct device *dev)
 	return err;
 }
 
+static void n1x_adsp_power_work(struct work_struct *work)
+{
+	struct n1x_adsp *dsp = container_of(work, struct n1x_adsp, power_work);
+	u32 value;
+	int err;
+
+	while (!atomic_read(&dsp->power_error) &&
+	       kfifo_out_spinlocked(&dsp->power_requests, &value, 1, &dsp->power_lock)) {
+		/* Submit the firmware's request through SSPM. This operation can
+		 * sleep and must run outside the mailbox interrupt handler.
+		 */
+		struct power_cntl_scmi_data data = {
+			.requestId = 0,
+			.customdata = {1, value, 0},
+		};
+		struct _power_cntrl_request request = {
+			.dev = dsp->dev,
+			.InBuffer = &data,
+			.InBufferSize = sizeof(data),
+		};
+
+		err = mtk_send_power_control_req(&request);
+		if (err) {
+			atomic_cmpxchg(&dsp->power_error, 0, err);
+			dev_err(dsp->dev, "DSP power request %#x failed: %d\n", value, err);
+			return;
+		}
+		atomic_inc(&dsp->power_completed);
+	}
+}
+
 static irqreturn_t n1x_adsp_irq(int irq, void *data)
 {
 	struct n1x_adsp *dsp = data;
 	u8 packet[ADSP_RX_BYTES];
-	u32 pending, bit;
+	u32 pending, bit, value;
 	u16 command;
 
 	if (!READ_ONCE(dsp->published))
@@ -119,6 +158,16 @@ static irqreturn_t n1x_adsp_irq(int irq, void *data)
 	if ((packet[19] >> 4) == 2 && command == 0xf002) {
 		WRITE_ONCE(dsp->boot_ready, true);
 		complete(&dsp->ready);
+	} else if ((packet[19] >> 4) == 2 && command == 0xf005 &&
+		   !atomic_read(&dsp->power_error)) {
+		value = get_unaligned_le32(packet + 24);
+		if (kfifo_in_spinlocked(&dsp->power_requests, &value, 1, &dsp->power_lock)) {
+			atomic_inc(&dsp->power_queued);
+			schedule_work(&dsp->power_work);
+		} else {
+			atomic_cmpxchg(&dsp->power_error, 0, -ENOSPC);
+			dev_err_ratelimited(dsp->dev, "DSP power request queue overflow\n");
+		}
 	}
 	return IRQ_HANDLED;
 }
@@ -268,9 +317,12 @@ static ssize_t status_show(struct device *dev, struct device_attribute *attribut
 
 	mutex_lock(&dsp->lock);
 	bytes = sysfs_emit(buffer,
-		"image=%#x attempted=%u published=%u loader_published=%u loader_accepted=%u ready=%u error=%d notifications=%u last_command=%#x services=0\n",
+		"image=%#x attempted=%u published=%u loader_published=%u loader_accepted=%u ready=%u error=%d notifications=%u last_command=%#x power_queued=%d power_completed=%d power_error=%d services=0\n",
 		dsp->target->image_id, dsp->attempted, dsp->published, dsp->loader.published,
-		dsp->loader.accepted, dsp->boot_ready, dsp->error, dsp->notifications, dsp->last_command);
+		dsp->loader.accepted, dsp->boot_ready, dsp->error,
+		dsp->notifications, dsp->last_command,
+		atomic_read(&dsp->power_queued), atomic_read(&dsp->power_completed),
+		atomic_read(&dsp->power_error));
 	mutex_unlock(&dsp->lock);
 	return bytes;
 }
@@ -349,6 +401,12 @@ static int n1x_adsp_probe(struct platform_device *pdev)
 	dsp->target = &targets[i];
 	mutex_init(&dsp->lock);
 	init_completion(&dsp->ready);
+	INIT_WORK(&dsp->power_work, n1x_adsp_power_work);
+	spin_lock_init(&dsp->power_lock);
+	INIT_KFIFO(dsp->power_requests);
+	atomic_set(&dsp->power_queued, 0);
+	atomic_set(&dsp->power_completed, 0);
+	atomic_set(&dsp->power_error, 0);
 	tail = *shared;
 	tail.start = tail.end + 1 - 0x400;
 	dsp->shared = devm_ioremap_resource(dev, &tail);
@@ -363,6 +421,7 @@ static int n1x_adsp_probe(struct platform_device *pdev)
 	err = devm_request_irq(dev, irq, n1x_adsp_irq, 0, dev_name(dev), dsp);
 	if (err)
 		return err;
+	dsp->irq = irq;
 	if (ACPI_FAILURE(acpi_get_name(adev->handle, ACPI_FULL_PATHNAME, &path)))
 		return -EINVAL;
 	dsp->pwrap = mtk_pwrap_dev_probe(path.pointer);
@@ -388,9 +447,12 @@ static int n1x_adsp_probe(struct platform_device *pdev)
 static void n1x_adsp_remove(struct platform_device *pdev)
 {
 	struct n1x_adsp *dsp = platform_get_drvdata(pdev);
-	int err = pm_runtime_resume_and_get(&pdev->dev);
+	int err;
 
 	/* Published instances pin the module and suppress manual sysfs unbind. */
+	devm_free_irq(&pdev->dev, dsp->irq, dsp);
+	cancel_work_sync(&dsp->power_work);
+	err = pm_runtime_resume_and_get(&pdev->dev);
 	pm_runtime_dont_use_autosuspend(&pdev->dev);
 	pm_runtime_disable(&pdev->dev);
 	mtk_pwrap_dev_remove(dsp->pwrap);
@@ -438,4 +500,4 @@ static struct platform_driver n1x_adsp_driver = {
 module_platform_driver(n1x_adsp_driver);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("Experimental P16 MT8901 secure DSP boot; no audio/compute services");
-MODULE_VERSION("0.1.0");
+MODULE_VERSION("0.1.1");

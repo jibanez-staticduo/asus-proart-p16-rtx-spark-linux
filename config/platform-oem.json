@@ -52,6 +52,41 @@
       "path": "Windows/System32/DriverStore/FileRepository/nvsrootmbx.inf_arm64_6ee85afcd10dd594/nvsrootmbx.sys",
       "bytes": 221928,
       "sha256": "f814e861b5e076aa4e00619a8a588df3c4ae9ec2b5026c30748ba493ce0e6d8a"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvasd.inf_arm64_a7c63a043236863a/nvasd.inf",
+      "bytes": 17024,
+      "sha256": "0f0cbeee8033c7e65fb2357c9f5c559f0c57926e666ff30ef1aaa9ce47526c53"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvasd.inf_arm64_a7c63a043236863a/nvasd.cat",
+      "bytes": 12776,
+      "sha256": "5aab31fc7e4c0a573af7fc506659114cbc2943136f5d686ce2d42add9d50a430"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvasd.inf_arm64_a7c63a043236863a/MT8901ResourceConstraints.xml",
+      "bytes": 14251,
+      "sha256": "5364dc0afe72fa59905bb1a97887f82b2b63b42a7d5bf425cb688acaacad2b17"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvasd.inf_arm64_a7c63a043236863a/nvasd.sys",
+      "bytes": 1251048,
+      "sha256": "a3eaa49ea54b1a7511542091efbd527000aeff4148753e68f179077c539224de"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvpep.inf_arm64_187addb88f158186/nvpep.inf",
+      "bytes": 5480,
+      "sha256": "41267772a96a40d114aa7a3ee50f6399f9f04d01bd9da9e1a96cb31477314af2"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvpep.inf_arm64_187addb88f158186/nvpep.cat",
+      "bytes": 11272,
+      "sha256": "80159d4169b6d9423d27e9c5546fef20797288b78547f734b74284e2a5fb34c9"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvpep.inf_arm64_187addb88f158186/nvpep.sys",
+      "bytes": 458472,
+      "sha256": "34cf1f2a9372a092555fb0887bfb76a8f205a76ff7e557224b353b09497c9bb1"
     }
   ]
 }

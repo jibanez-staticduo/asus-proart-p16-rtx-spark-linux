@@ -82,9 +82,15 @@ def verify_image(path):
         offset = start + size + 3 & ~3
         if name == 'TRAILER!!!':
             break
-    for name, pin in PINS.items():
-        if not hashlib.sha256(files['kernel/firmware/acpi/' + name]).hexdigest() == pin:
-            raise ValueError('Falsche ACPI-Tabelle im UKI: ' + name)
+    ssdt = files.get('kernel/firmware/acpi/SSDT.aml')
+    if ssdt is None or hashlib.sha256(ssdt).hexdigest() != PINS['SSDT.aml']:
+        raise ValueError('Falsche ASUS-SSDT im UKI')
+    dsdt = files.get('kernel/firmware/acpi/DSDT.aml')
+    if dsdt is not None:
+        if package not in QUALIFIED_KERNELS.values():
+            raise ValueError('Statische DSDT mit bootabhängiger GNVS-Adresse im verwalteten UKI')
+        if hashlib.sha256(dsdt).hexdigest() != PINS['DSDT.aml']:
+            raise ValueError('Falsche Legacy-DSDT im unveränderten Recovery-UKI')
     with tempfile.NamedTemporaryFile() as tmp:
         tmp.write(data)
         tmp.flush()
@@ -108,6 +114,8 @@ def verify_image(path):
 
 def verify_menu(config_path=Path('/boot/limine.conf'), boot_root=Path('/boot'), installed_npu=None):
     config = config_path.read_text()
+    defaults = re.findall(r'^default_entry:\s*(.*?)\s*$', config, re.M)
+    clean_mode = defaults in (['Omarchy-P16'], ['Omarchy-P16-Recovery'])
     entries = []
     for line in config.splitlines():
         if line.lstrip().startswith('#'):
@@ -123,17 +131,29 @@ def verify_menu(config_path=Path('/boot/limine.conf'), boot_root=Path('/boot'), 
             if hashlib.blake2b(image.read_bytes()).hexdigest() != pin.lower():
                 raise ValueError('EFI-Hash stimmt nicht: ' + path)
             entries.append(path)
-    if '/EFI/Linux/omarchy_linux-p16-asus-23.efi' not in entries:
+    if clean_mode:
+        for path in ('/EFI/Linux/omarchy_p16.efi', '/EFI/Linux/omarchy_p16-recovery.efi'):
+            if path not in entries:
+                raise ValueError('Qualifizierter P16-Boot-/Recovery-Eintrag fehlt: ' + path)
+            verify_image(boot_root / path.lstrip('/'))
+        if not re.search(r'^/' + re.escape(defaults[0]) + r'\s*$', config, re.M):
+            raise ValueError('Qualifizierter P16-Default fehlt im Menü')
+    elif '/EFI/Linux/omarchy_linux-p16-asus-23.efi' not in entries:
         raise ValueError('P16-Eintrag fehlt im Limine-Menü')
     npu_image = '/EFI/Linux/omarchy_linux-rtx-spark-npu.efi'
     if installed_npu is None:
         installed_npu = subprocess.run(['pacman', '-Qq', 'linux-rtx-spark-npu'],
                                        capture_output=True).returncode == 0
-    if installed_npu:
+    if installed_npu and not clean_mode:
         if npu_image not in entries:
             raise ValueError('Installierter RTX-Spark-NPU-Kernel fehlt im Limine-Menü')
         defaults = re.findall(r'^default_entry:\s*(.*?)\s*$', config, re.M)
-        if defaults != ['Omarchy/linux-rtx-spark-npu']:
+        if defaults == ['p16-native-dsdt-test']:
+            native = boot_root / 'EFI/Linux/omarchy_p16-native-dsdt-test.efi'
+            if '/EFI/Linux/omarchy_p16-native-dsdt-test.efi' not in entries:
+                raise ValueError('Native-DSDT-Default fehlt im Limine-Menü')
+            verify_image(native)
+        elif defaults != ['Omarchy/linux-rtx-spark-npu']:
             if len(defaults) != 1 or not re.fullmatch(r'Omarchy/linux-p16-[a-z0-9-]+', defaults[0]):
                 raise ValueError('Kein qualifizierter P16-NPU-Default im Limine-Menü')
             image = boot_root / ('EFI/Linux/omarchy_' + defaults[0].split('/', 1)[1] + '.efi')
@@ -146,7 +166,8 @@ def verify_menu(config_path=Path('/boot/limine.conf'), boot_root=Path('/boot'), 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--image', type=Path, default=Path('/boot/EFI/Linux/omarchy_linux-p16-asus-23.efi'))
+    primary = Path('/boot/EFI/Linux/omarchy_p16.efi')
+    parser.add_argument('--image', type=Path, default=primary if primary.is_file() else Path('/boot/EFI/Linux/omarchy_linux-p16-asus-23.efi'))
     parser.add_argument('--image-only', action='store_true')
     args = parser.parse_args()
     try:
