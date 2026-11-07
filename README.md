@@ -476,6 +476,8 @@ Balanced maps to ASUS Balanced, Performance to ASUS Performance, and Power Saver
 
 `p16-asus-controls.service` loads the ASUS driver before power profile discovery. `p16-charge-limit.service` sets the charge limit to **100%** after battery registration. Both services are restricted to the validated ASUS P16 kernel releases (`7.2.8-14` and `7.2.8-23`). The factory fan curves remain active.
 
+At the critical battery level, UPower powers the laptop off (`/etc/UPower/UPower.conf.d/50-p16-critical.conf`, in `p16-platform-policy`). The kernel has no hibernation, so UPower's `Auto` action picks `Sleep`, which suspends, and suspend-to-idle still drains the battery. UPower reads the file at start: run `sudo systemctl restart upower` after installing the package. `scripts/check-update-state.py` checks that `GetCriticalAction` reports `PowerOff`.
+
 Display temperatures:
 
 ```bash
