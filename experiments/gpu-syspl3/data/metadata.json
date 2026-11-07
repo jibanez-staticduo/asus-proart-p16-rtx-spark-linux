@@ -1,0 +1,21 @@
+{
+  "date": "2026-11-07",
+  "machine": "ASUS ProArt P16 H7607BA",
+  "bios": "H7607BA.300",
+  "kernel": "7.2.8-23-rtx-spark-npu",
+  "driver": "615.78.08",
+  "cuda": "13.4.2",
+  "profile_after": "performance",
+  "workload": "8192 cubed cuBLAS GEMM, FP16 inputs/output, FP32 accumulation, tensor operations",
+  "matrix_bytes": 402653184,
+  "source_provenance": {
+    "description": "Hashes of local sources used in the hardware runs. Published study.c adds the later memory-error guard and replaces the local boot ID and username with compile-time gates. Per-run source snapshots remain local.",
+    "run-01-study-sha256": "a59b578caf72415c4641bb628c56d304d37f55ab10ed9f21c478166918d20291",
+    "run-03-study-sha256": "f1824ae6e6f7f0d2e70b08bc3378b9ee41abefd1c56637b0f7f01a59b357d8ff",
+    "gemm-stream-sha256": "5ff8429c9093d24ef0f001166b64da29fd18bbb0df0144ff3f9467764a8b905f"
+  },
+  "memory_context": {
+    "run-01": "Two NVIDIA NV_ERR_NO_MEMORY allocation errors, process unidentified; recorded in kernel-check-full.json.",
+    "between_runs": "At monotonic 98256.56 s a Kubernetes pod hit its memory-cgroup limit; task beam.smp. This was not a global OOM. Causal connection to the NVIDIA allocation errors is unproven."
+  }
+}

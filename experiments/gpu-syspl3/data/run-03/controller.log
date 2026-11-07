@@ -1,0 +1,5 @@
+Waiting for SoC below 76 C before the short confirmation
+Baseline recording started
+SysPL3 request applied: 125000 mW (EC 130000 mW)
+SysPL3 OS request restored to zero
+Final request=0 effective=130000 EC=130000 clean=1 result=0

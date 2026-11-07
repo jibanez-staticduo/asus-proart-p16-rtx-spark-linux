@@ -20,6 +20,8 @@ product-name or BIOS checks.
 See [driver status](docs/platform-driver-status.md),
 [matching policy](platform/README.md) and
 [upstream requirements](docs/upstream-readiness.md) for scope and limitations.
+The [GPU power measurements](docs/gpu-power.md) cover the bounded SysPL3
+experiment and its qualification limits.
 
 ## Build
 
