@@ -22,6 +22,8 @@ See [driver status](docs/platform-driver-status.md),
 [upstream requirements](docs/upstream-readiness.md) for scope and limitations.
 The [GPU power measurements](docs/gpu-power.md) cover the bounded SysPL3
 experiment and its qualification limits.
+The [native vLLM setup](docs/vllm-qwen38.md) records the Unsloth NVFP4 and
+DFlash2 configuration; model execution and throughput remain unvalidated.
 
 ## Build
 
