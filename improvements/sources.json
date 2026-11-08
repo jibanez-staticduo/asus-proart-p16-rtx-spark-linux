@@ -27,7 +27,7 @@
       "adaptation": "Consolidated Linux7.3 port, P16 automatic firmware admission and suspend-only policy; not a new upstream sign-off"
     },
     "patch_count": 84,
-    "adaptation_note": "The exported subset omits unrelated scheduler, x86 and Qualcomm changes from the reference distro. The coordinated patch has a comment-only follow-up documenting its tested 20-CPU admission; test_coverage.py additionally checks 18-CPU safe fallback. Use olddefconfig; no full rebuild of this compact subset is claimed.",
+    "adaptation_note": "The exported subset omits unrelated scheduler, x86 and Qualcomm changes from the reference distro. The coordinated follow-up tentatively admits 18 or 20 present CPUs while retaining the existing complete-coverage and firmware hierarchy contracts; only the 20-CPU P16 is physically validated. Use olddefconfig; no full rebuild of this compact subset is claimed.",
     "followups": [
       {
         "repository": "https://github.com/torvalds/linux",
@@ -43,13 +43,13 @@
     "local_followups": [
       {
         "file": "kernel/1122-n1x-coordinated-suspend-only.patch",
-        "change": "Comment-only documentation of the tested 20-CPU coordinated-sleep admission; no functional gate change",
-        "sha256": "cbe657de813b19c050fb39b58c5d9844a8f6e8ee29f98125233830aab616e8bc"
+        "change": "Tentative 18/20-CPU coordinated-sleep admission under the same structural firmware gates, with actual CPU count in the boot message; physical validation remains limited to 20 CPUs",
+        "sha256": "6e74165d9c46f6d582e83688386e9090cb8fb9933657ee0f49bd296b1df074c4"
       },
       {
         "file": "kernel/test_coverage.py",
-        "change": "Explicit 18-CPU non-retryable fallback regression alongside 16/19 rejection and tested 20-CPU admission",
-        "sha256": "893f30edc82352c37f6fded8996cb26189eacea4bfa57c469f23b66e3b4e3e51",
+        "change": "Actual admission regression covers 18/20-CPU acceptance with the existing hierarchy and 16/19 rejection; structural and transient-error checks remain required",
+        "sha256": "05d79541ee7964f979ca1b58e28de35e6b10b29b60b57957fc066c5ba9b99941",
         "sku_reference": "https://www.nvidia.com/en-us/products/rtx-spark/specifications/"
       }
     ]
