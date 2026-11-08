@@ -81,3 +81,4 @@
 9102-spi-acpi-irq-retry.patch
 9103-asus-capability-aware-initialization.patch
 9104-spi-hid-acpi-reset-handle.patch
+9105-mt7925-mld-membership.patch

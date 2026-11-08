@@ -13,7 +13,7 @@ Use your distribution's kernel/module packaging and boot procedure.
 
 | Component | Improvements |
 |---|---|
-| [Kernel](improvements/kernel/README.md) | Coordinated s2idle, LPS0 timing, PCI/SD resume fixes and required N1X platform prerequisites |
+| [Kernel](improvements/kernel/README.md) | Coordinated s2idle, LPS0 timing, PCI/SD resume fixes, MT7925 MLO correction and required N1X platform prerequisites |
 | ASUS platform | ARM64 WMI, exposed/preserved battery charge threshold, fan RPM and capability-aware initialization |
 | Light sensor | Virtual GPIO/IRQ handling and ACPI reset fix that brings up SPI-HID and IIO illuminance |
 | [Audio](improvements/audio/README.md) | Board-specific speaker routing and public audio support instructions |

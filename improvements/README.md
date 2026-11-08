@@ -21,6 +21,9 @@ for the user to choose. Standard GPU, CUDA and container packages remain the
 responsibility of their respective distributions/vendors. The GPU has CUDA
 compute capability 12.1; select a toolkit that supports it.
 
+The kernel series also includes the upstream MT7925 MLO membership correction;
+it preserves automatic band/AP selection and 6 GHz availability.
+
 The base patches are also available for review in [kernel PR1958](https://github.com/omacom/omarchy-pkgs/pull/1958).
 
 Run `python3 improvements/verify.py` from the repository root to check the

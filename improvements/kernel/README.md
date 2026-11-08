@@ -7,7 +7,7 @@ This is not the AMD/x86 ProArt P16. BIOS 303 is the physically tested firmware.
 
 `series` applies to the pristine **Linux 7.3** release. It includes the required
 N1X/MediaTek and SPI-HID prerequisites, not just our final fixes. Patches are
-copied without modification from the pinned source recorded in
+copied from the pinned sources, with narrowly documented follow-ups recorded in
 [`../sources.json`](../sources.json). Existing From/author/sign-off notices
 remain intact. The base platform work belongs to NVIDIA and the kernel authors;
 the additions build on Johann Hartmann and Josephine Pfeiffer's P16 work.
@@ -28,6 +28,7 @@ the additions build on Johann Hartmann and Josephine Pfeiffer's P16 work.
 | 9102 | Deferred ACPI IRQ lookup for SPI-HID |
 | 9103 | Architecture/capability guards for optional ASUS LPS0, i8042 and fan initialization |
 | 9104 | Invoke the sensor's ACPI `_RST` on its saved namespace handle |
+| 9105 | Keep MT7925 MLO firmware membership consistent when adding a secondary link |
 
 1122 is a consolidated port based on NVIDIA NV-Kernels PR586 at
 `2562f5f1d1cecfd2047d3810d4bf5626366f1d32`, plus PR599/601, with local
@@ -116,3 +117,26 @@ See [validation and limits](../VALIDATION.md) before interpreting sleep results.
 
 License: Linux patches retain their source licenses (GPL-2.0-only as packaged);
 tests preserve SPDX notices. See the root `LICENSES.md`.
+
+## MT7925 MLO follow-up
+
+Patch 9105 is the unmodified upstream commit
+[`dd3f17ef69ed`](https://github.com/torvalds/linux/commit/dd3f17ef69ed6d0085cd94a15b9dec227b4ebfb1),
+authored by Andrei Rusu de Castro. While adding a secondary link, the two
+firmware station updates now contain the same published and pending MLD links.
+The pending link is published to host state only after setup succeeds; record
+capacity and primary-first ordering are retained. No band, BSSID, VPN or
+roaming setting is changed. In particular, 6 GHz remains available.
+
+`test_mld.py` extracts the real TLV function and firmware structure from the
+prepared tree and compiles a native C harness with ASan/UBSan and `-Werror`.
+The old function fails with inconsistent member counts 1/2; the fixed function
+passes pending/published membership, absent station/BSS, duplicates, capacity,
+primary fallback and both real add-time caller checks. `check.sh` includes it.
+See the validation record for measured connectivity and remaining limits.
+
+The coordinated-sleep series currently admits the tested 20-CPU topology.
+N1X also has 18-CPU SKUs; those are not physically validated by this export and
+retain the normal non-coordinated fallback without retrying permanent admission
+failure until their topology contract
+is supported and tested. CPU count alone does not establish compatibility.
