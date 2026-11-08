@@ -1,11 +1,12 @@
 # Maintainer: The Omarchy Authors
 # Adopted from the Arch Linux linux package.
 
-# Versioned P16 package: preserve earlier working kernels alongside this build.
-pkgbase=linux-p16-asus-23
-_kernel=linux-p16-asus-23
+# Dedicated P16 package; generation-23 kernels remain separate recovery packages.
+pkgrel=${P16_KERNEL_RELEASE:-26}
+[[ $pkgrel =~ ^[1-9][0-9]*$ ]] || { echo 'P16_KERNEL_RELEASE must be a positive integer' >&2; exit 1; }
+pkgbase=linux-p16-platform
+_kernel=$pkgbase
 pkgver=7.2.8
-pkgrel=23
 pkgdesc='Omarchy kernel for ASUS ProArt P16 H7607BA.300 (N1X, ACPI, SPI HID, ASUS WMI)'
 url='https://omarchy.org'
 arch=(
@@ -24,9 +25,6 @@ makedepends=(
   pahole
   perl
   python
-  rust
-  rust-bindgen
-  rust-src
   tar
   xxhash
   xz
@@ -1248,6 +1246,9 @@ source+=(
   p16-virtual-gpio.patch
   spi-acpi-irq-retry.patch
   asus-arm64-combined.patch
+  p16-sensorhub.patch
+  n1x-sroot-cca.patch
+  p16-afe-sram.patch
 )
 sha256sums+=(
   '0ababbaed19c7108e8564916fac1b8fecc44010e7f3e4b419c34d01c66049e19'
@@ -1255,6 +1256,9 @@ sha256sums+=(
   '0e20e5854cb0613e154f18cb8ddbae52a3ae614915815ea2872dd7db6dc97018'
   '6e94e341bcd221dbfec7432c12a7668b6da9eac34a1f3ba7e3d337657baa8d79'
   '1c5a9f3ce03931bc50dcb7c4580f57c2b3fcc8a87ce92a226a174f8bf3e6755a'
+  '1474cd07c14e8719eb000c441f34c15e88db1746c2c641e5b35f149e3115d325'
+  'e49c9020f1ad4e3d075410aca5addeee73caf507e210056f72f24c6cc7d46a17'
+  '302b55f5d8713cd67940ddbd2eb920bb3b6a69d3d0ff33227bb43a898d907375'
 )
 b2sums+=(
   '693cd18dfde6d3a831bd7a47d0ee64dcbd206bb9bf99832365c653839f6b4116cc086f5596c53b74eb07210cf0f74ffd496a7157681cc50421e8fdcc2fc9ae98'
@@ -1262,6 +1266,9 @@ b2sums+=(
   '54d04dd82919f90b5645da972f928eef016ecba2ff7c3cb61968f1687d4f796093756cc040d5e4254270e1a4a49a774d76c71caeff978e1875baf36f748b90ab'
   'da3f0ce31b953b4b6a5162423d06a692d81349457533cf5ac8758a00aa5f305526ba567fb25a4ad28b10c631ce47b2b617753e6f207b63aaf5a1bd8bf1e10681'
   'e48b5c72e79d6302b2016223dcbcd43d107938f819f64075bb019667051bf36e828d3b76cae693f41a27f78094b60f4b71af6ae0e0588a0d57f8c87be32c4293'
+  '9fb64b6b2c29de49990b9074fa06bc24de780a4bb90492cee3e0f39447e00c66b38069cba8170833ae0c998159ffbd4e91ae0b602d97a6057ebb86a0be2893e8'
+  '7e1db03bb13b19442016a7b6436ebab496964a629ab64a723b11026b3039d49f30e11b732e239e7322383807b0e7997b76e0c122a55620b6aa86c619821379e8'
+  '1b862e58974a12f6609ae7851f0f3b2e21dfdd54adfd27d0556ff36390afbc98f83d79587ce542d09b5034e4c481976ea1c9aa0e57b3ae0a2defc70fb2e286a2'
 )
 
 # https://www.kernel.org/pub/linux/kernel/v7.x/sha256sums.asc
@@ -1276,7 +1283,8 @@ prepare() {
   echo "Setting version..."
   echo "-$pkgrel" > localversion.10-pkgrel
   echo "-omarchy" > localversion.20-pkgname
-  echo "-p16" > localversion.30-p16
+  echo "-p16-asus-npu" > localversion.30-p16
+  rm -f localversion.40-asus
 
   if [[ -n ${_rcpatch:-} ]]; then
     echo "Applying patch $_rcpatch..."
@@ -1308,7 +1316,7 @@ prepare() {
 
 build() {
   cd $_srcname
-  MAKEFLAGS="-j$(nproc) $MAKEFLAGS"
+  MAKEFLAGS="${MAKEFLAGS:--j$(nproc)}"
   # N1x boots through ACPI. The Snapdragon laptops get no device tree from
   # their firmware, so build theirs and skip the other arm64 DTBs that
   # "make all" would build.
@@ -1325,17 +1333,17 @@ _package() {
     coreutils
     initramfs
     kmod
+    "$_kernel-headers=$pkgver-$pkgrel"
   )
   optdepends=(
-    "$_kernel-headers: headers and scripts for building modules"
     'linux-firmware: firmware images needed for some devices'
     'scx-scheds: to use sched-ext schedulers'
     'sof-firmware: firmware for Intel SOF audio'
     'wireless-regdb: to set the correct wireless channels of your country'
   )
   # linux-omarchy-n1x is the name this package had.
-  conflicts=()
-  replaces=()
+  conflicts=(linux-p16-platform-24)
+  replaces=(linux-p16-platform-24)
   provides=(
     P16-ASUS-KERNEL
   )
@@ -1380,8 +1388,8 @@ _package-headers() {
     zlib
     zstd
   )
-  conflicts=()
-  replaces=()
+  conflicts=(linux-p16-platform-24-headers)
+  replaces=(linux-p16-platform-24-headers)
   provides=(LINUX-HEADERS)
 
   cd $_srcname

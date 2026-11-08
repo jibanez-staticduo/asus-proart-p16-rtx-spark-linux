@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 build() {
-    [[ $KERNELVERSION == 7.2.8-14-omarchy-p16 || $KERNELVERSION == 7.2.8-14-omarchy-p16-asus || $KERNELVERSION == 7.2.8-23-omarchy-p16-asus || $KERNELVERSION == 7.2.8-23-omarchy-p16-asus-npu2 || $KERNELVERSION == 7.2.8-23-rtx-spark-npu ]] || {
+    grep -q ' T arch_alloc_acpi_tables$' "/usr/lib/modules/$KERNELVERSION/build/System.map" || {
         error 'P16 ACPI override requires the dedicated kernel allocation fix'
         return 1
     }
-    add_file_early /etc/initcpio/p16-acpi/DSDT.aml /kernel/firmware/acpi/DSDT.aml
+    # Use the live firmware DSDT: a captured DSDT embeds a boot-specific GNVS
+    # physical address. The installed acpi_osi="!Windows 2022" command line
+    # already supplies the SSPM _STA behavior that the old DSDT patch changed.
     add_file_early /etc/initcpio/p16-acpi/SSDT.aml /kernel/firmware/acpi/SSDT.aml
 }
 help() {
-    echo 'Hash-validated H7607BA.300 SSPM and EC/battery fixes, for the dedicated P16 kernel only.'
+    echo 'H7607BA.300 ASUS EC/battery SSDT with the native firmware DSDT; requires acpi_osi="!Windows 2022".'
 }

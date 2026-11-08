@@ -2,7 +2,9 @@
   "format": 1,
   "reference_upstream": {
     "repository": "https://github.com/johannhartmann/asus-proart-p16-rtx-spark-linux",
-    "commit": "93e0d2286888a69f31eca8f5b243005c9b293535"
+    "commit": "93e0d2286888a69f31eca8f5b243005c9b293535",
+    "latest_integration_commit": "21caf8212b4bee8f8a339fc6588e320667f7505b",
+    "latest_integration_note": "The contribution branch merges the current upstream repository; the portable main branch keeps only this hardware-patch guide."
   },
   "kernel": {
     "release": "7.3",
@@ -11,7 +13,7 @@
     "patch_repository": "https://github.com/jibanez-staticduo/omarchy-pkgs",
     "patch_commit": "c596e1f8ce4e91d576e6edbe0f4b85058b8bafbd",
     "patch_path": "pkgbuilds/linux-omarchy-aarch64",
-    "files_copied_without_modification": true,
+    "files_copied_without_modification": false,
     "config_reference": "config.aarch64 from the same commit",
     "base_platform_provenance": "NVIDIA Ubuntu-nvidia-7.0-7.0.0-1021.21 SAUCE and source notices in patches",
     "coordinated_port": {
@@ -24,8 +26,33 @@
       ],
       "adaptation": "Consolidated Linux7.3 port, P16 automatic firmware admission and suspend-only policy; not a new upstream sign-off"
     },
-    "patch_count": 83,
-    "adaptation_note": "The exported subset omits unrelated scheduler, x86 and Qualcomm changes from the reference distro. Use olddefconfig; no full rebuild of this compact subset is claimed."
+    "patch_count": 84,
+    "adaptation_note": "The exported subset omits unrelated scheduler, x86 and Qualcomm changes from the reference distro. The coordinated patch has a comment-only follow-up documenting its tested 20-CPU admission; test_coverage.py additionally checks 18-CPU safe fallback. Use olddefconfig; no full rebuild of this compact subset is claimed.",
+    "followups": [
+      {
+        "repository": "https://github.com/torvalds/linux",
+        "commit": "dd3f17ef69ed6d0085cd94a15b9dec227b4ebfb1",
+        "file": "kernel/9105-mt7925-mld-membership.patch",
+        "author": "Andrei Rusu de Castro",
+        "sha256": "e1601fbb3d388d1650d2149215c3e49c58f76746b1009f8b6e6557bf9a4d8808",
+        "test": "kernel/test_mld.py",
+        "test_reference_repository": "https://github.com/jibanez-staticduo/omarchy-pkgs",
+        "test_reference_commit": "8abf19a4e9a96dc86d1827593d9e02d34db3db88"
+      }
+    ],
+    "local_followups": [
+      {
+        "file": "kernel/1122-n1x-coordinated-suspend-only.patch",
+        "change": "Comment-only documentation of the tested 20-CPU coordinated-sleep admission; no functional gate change",
+        "sha256": "cbe657de813b19c050fb39b58c5d9844a8f6e8ee29f98125233830aab616e8bc"
+      },
+      {
+        "file": "kernel/test_coverage.py",
+        "change": "Explicit 18-CPU non-retryable fallback regression alongside 16/19 rejection and tested 20-CPU admission",
+        "sha256": "893f30edc82352c37f6fded8996cb26189eacea4bfa57c469f23b66e3b4e3e51",
+        "sku_reference": "https://www.nvidia.com/en-us/products/rtx-spark/specifications/"
+      }
+    ]
   },
   "telemetry": {
     "repository": "https://github.com/johannhartmann/spark_hwmon",

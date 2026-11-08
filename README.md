@@ -22,7 +22,8 @@ origins and local adaptations in [Provenance and local additions](#provenance-an
 A separate [hardware patch guide](improvements/README.md) provides an ordered
 Linux 7.3 series with its N1X prerequisites, coordinated s2idle and LPS0 timing,
 ASUS WMI on ARM64, battery-threshold preservation, capability-aware fan
-initialization, and the SPI-HID ACPI reset fix for the ambient-light sensor.
+initialization, the SPI-HID ACPI reset fix for the ambient-light sensor, and the upstream
+MT7925 MLO membership correction.
 It also includes speaker-route and telemetry patches, an open PipeWire graph,
 source regression tests and [physical validation results and limits](improvements/VALIDATION.md).
 
@@ -53,6 +54,177 @@ ACPI overrides are generated from the target machine's own firmware tables.
 
 For the installed machine's package-owned customization and boot-image update
 policy, see [Update-safe P16 installation](docs/update-safe.md).
+The [platform driver status](docs/platform-driver-status.md) separates current
+interfaces and hardware results from unfinished service and lifecycle work.
+
+The experimental SCP driver in `platform/scp` now reads the running firmware's
+log and sends bounded version/sensor-descriptor queries. It is gated to the
+H7607BA BIOS 300 resource layout and the observed SCP 2.0.8.0 dispatch ABI.
+It does not reset or replace platform-owned firmware. SCP queries, the ALS
+sensor, Pluton PCBI metadata queries and secure boot of all three DSPs have
+passed live tests. DSP transport, primary-buffer registration and task
+OPEN/HWFREE/CLOSE also passed hardware checks. DSP streaming/shutdown and
+Pluton control-service support remain unfinished; see the platform status
+for the qualification limits.
+
+Build the SCP package with `cd platform/scp && makepkg -f`, then install its
+`n1x-scp-dkms` package with
+`sudo python ../../scripts/install-scp.py ./n1x-scp-dkms-*.pkg.tar.*`.
+This late-loaded module does not need an initramfs rebuild. The installer keeps
+the preflight/DKMS hooks, suppresses the broad image rebuild for this transaction,
+and verifies that the existing EFI images and Limine configuration are unchanged.
+DKMS rebuilds it for installed kernel headers and future kernel updates;
+package-owned modprobe/modules-load files enable it on boot. Load it now with
+`sudo modprobe n1x_scp`. Validate with
+`sudo cat /sys/kernel/debug/n1x_scp/firmware_version` and
+`sudo cat /sys/kernel/debug/n1x_scp/sensor_descriptors`.
+The firmware log and a per-open read-only SRAM snapshot are in the same debugfs
+directory. A mailbox timeout or unexpected reply disables further queries
+for that loaded instance. Remove the package and run `sudo modprobe -r n1x_scp`
+to return to the unbound SCP state; no boot artifact or firmware is replaced.
+
+`scripts/platform-inventory.py` captures live bindings and telemetry;
+`--capture-acpi` additionally records checksum-checked tables as root, excluding
+the MSDM product-key table. `scripts/prepare-platform-sources.py` stages pinned
+Linux/MediaTek reference sources under the sibling `n1x-lab/platform/sources`
+directory. Add `--fetch-vendor` to acquire and hash-check the ASUS recovery input
+for offline driver/firmware extraction; the installer is never executed.
+Run `scripts/extract-platform-drivers.py` to reproduce or verify the selected
+OEM driver/firmware files, then `scripts/prepare-dsp-firmware.py` to select the
+intact MT8901 signed images for both HiFi5 cores and the HiFi1 core. These are
+staged under `n1x-lab/platform/firmware`. The preparation script also checks
+the bounded COSE/container structure and all six section SHA-384 digests in
+each image. These local checks do not authenticate signatures or prove
+execution; the hardware results below establish image acceptance and readiness.
+
+[`platform/dsp`](platform/dsp/README.md) now contains an experimental native
+DSP driver with the existing SSPM power path, gated secure firmware upload
+and the OEM boot-ready notification. The sibling NPU source contains its
+serialized SROOT provider API, plus fault-injection tests. On 2026-11-05 the
+provider passed checked NPU shutdown/reload and 16 numerical inference
+outputs. SROOT then accepted all three DSP images and each core sent the
+expected `0xf002` ready notification; another eight NPU outputs passed with
+all DSPs running. The DSP package defaults to autoload and
+firmware boot disabled; audio/compute services and a verified DSP shutdown
+protocol remain unimplemented. `scripts/validate-dsp-live.py --test-probe`
+tests binding with boot disabled and restores the stock power driver.
+The successful boot-trial report is
+`../n1x-lab/results/platform-enablement-20261105/dsp-boot-trial-2.json`.
+Published DSP DMA/power references remain pinned until reboot. Normal DSP
+audio/compute services and reboot persistence are not established by boot-ready
+notifications.
+
+`n1x-adsp-dkms` 0.1.0-2, `n1x-sroot-provider-dkms` 0.1.0-1 and the local
+firmware package are installed. All four installed kernels have the DSP and
+provider DKMS builds. The gated NPU service is active and verified on the
+running kernel; the selected default entry remains `linux-rtx-spark-npu`.
+Installation preserved every existing EFI image and Limine hash, including
+the base recovery entry. `platform-installed-audit-2.json` in the same results
+directory records matching loaded/installed modules, SCP version 2.0.8.0,
+Pluton channels 1/2, five ALS readings of 16 lux under the later ambient light,
+and valid hashes for all five EFI images. Optical calibration remains unverified.
+
+`scripts/verify-platform-install.py --report PATH` repeats the installed-driver
+checks. After a reboot, add `--after-boot-id SAVED_PREVIOUS_BOOT_ID`; it refuses
+to claim reboot verification if the ID has not changed. Run that post-boot
+check without `--start-npu-service` so an autostart failure remains visible.
+DSP firmware boot remains manual after reboot, pending its shutdown and
+audio/compute service work.
+
+The sensor-hub work in `platform/sensorhub` and `kernel/p16-sensorhub.patch`
+fixes ACPI reset dispatch and SPI HID report-type handling. The reset fix has
+enumerated the real SPI HID sensor hub and its ALS IIO device on the running
+machine. Its VEML3328 firmware streams input reports and ignores synchronous
+GET_INPUT requests; a P16-specific asynchronous request path is included.
+On 2026-11-05 `n1x-sensorhub-dkms` 0.1.0-1 was installed for all four
+installed kernel headers. Five live ALS samples returned raw values
+`1240, 1240, 1240, 1230, 1230`, with scale `0.1` (123–124 lux), without the
+previous timeout/reset loop. A startup "HID not ready" message preceded HID
+attachment: the transport dropped an input frame during initialization;
+the subsequent five samples succeeded. Optical response and calibration
+accuracy still require verification.
+
+`scripts/install-sensorhub.py` installs the package and explicitly rebuilds
+only the current P16 and selected default P16 UKIs. It verifies that both
+embed the installed DKMS modules byte-for-byte and updates their Limine
+hashes. The November 5 installation preserved the base P16 recovery image,
+stock image, fallback image and selected default entry. Backups and the
+installation log are under
+`/var/lib/p16-platform/boot-hook-backup/sensorhub-20261105T072926Z`;
+the evidence report is
+`../n1x-lab/results/platform-enablement-20261105/sensorhub-install-3.json`.
+Reboot persistence remains unverified. The same transport patch is included
+in the kernel recipe.
+
+### Existing driver bases checked on 2026-11-04
+
+| Device | Reusable source | Porting limit |
+|---|---|---|
+| `NVDA8301` / `8302` / `8303` DSPs | NVIDIA's [MT8901 power-management driver](https://github.com/NVIDIA/NV-Kernels/commit/adfdf495ec524abc32a01cc4a445395b973c597d), mainline [MT8195 SOF](https://github.com/torvalds/linux/blob/v7.3/sound/soc/sof/mediatek/mt8195/mt8195.c), and the pinned MediaTek Android ADSP reference | The exact MT8901 driver already binds here, but its upstream commit explicitly leaves firmware loading, IPC and topology unimplemented. The other SoCs provide implementation references; their register layouts and firmware ABIs are not established as compatible with N1X. |
+| `NVDA8200` SCP | Mainline [MediaTek SCP remoteproc](https://github.com/torvalds/linux/blob/v7.3/drivers/remoteproc/mtk_scp.c) and the pinned MediaTek Android SCP/VCP references | Mainline lists other MediaTek device-tree platforms, with no N1X ACPI binding. The P16 firmware uses its own observed token/command mailbox format. Our bounded native query driver now works with that firmware. |
+| `MSFW1111` sensor hub / VEML3328 ALS | The existing SPI HID transport and Linux [HID sensor ALS](https://github.com/torvalds/linux/blob/v7.3/drivers/iio/light/hid-sensor-als.c) | Reuse the HID/IIO stack, with the local reset and report-request fixes; calibrated live values are still unverified. |
+| `NVDA8601` Pluton ROT1 | Microsoft PlutonNv binary and public symbols, plus the [Microsoft Azure Sphere source catalog](https://opensource.microsoft.com/3pc/)'s older Pluton mailbox/provider implementation as a design reference | No public Linux N1X binding was found. The inspected Azure Sphere 25.03 code sends pointers through its remote-API provider/security monitor, rather than implementing the observed N1X PFI packet interface. Linux `tpm_crb` Pluton support is a separate TPM start-method interface, not this ROT1 transport. |
+
+`platform/pluton` contains the native ROT1/PFI transport, a typed PCBI query
+ioctl, a root CLI and protocol/fault tests. Package `n1x-pluton-dkms 0.2.0-1`
+is installed for all five kernel headers. The typed queries were verified
+on hardware: protocol version 1, services 1/v1 and 2/v1, platform 6 and running
+package `PltnFull`. The kernel constructs the three supported query requests
+and validates complete replies. Generic raw exchange is disabled by default.
+The source defaults to transport disabled; package-owned modprobe configuration
+permits transactions when explicitly requested by a client. Probe sends no
+service query, and the info ioctl only reads status. No security firmware is
+loaded and no key or provisioning request is implemented. The working FF-A TPM
+and NPU SROOT are separate devices. The API and qualification are documented
+in [PCBI query service](platform/pluton/protocol.md) and the platform status.
+
+The original Microsoft Azure Sphere **25.03** kernel source archive and its
+selected Pluton sources are staged under `n1x-lab/platform/sources/vendor` and
+`n1x-lab/platform/sources/upstream/azure-sphere-25.03` respectively.
+`platform/pluton/references.json` records the catalog entry, archive SHA-256
+and individual source hashes. Its mailbox adapters, remote-API provider,
+`pluton-rng` and clock driver are references for that older platform, not
+validated N1X services. The catalog also lists 26.09, which was not inspected.
+
+For offline wire-format checks, run:
+
+```bash
+cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+  -o /tmp/p16-pluton-protocol-test platform/pluton/protocol_test.c
+/tmp/p16-pluton-protocol-test
+```
+
+`scripts/validate-platform-live.py` captures root-only SCP SRAM/calibration
+metadata and current DSP power states without changing firmware or EFI
+variables. Its default mode performs no mailbox queries or module changes:
+
+```bash
+sudo python scripts/validate-platform-live.py \
+  --report ../n1x-lab/results/platform-enablement-20261104/live-read-only.json
+```
+
+After building the current-kernel modules in `platform/sensorhub` and
+`platform/pluton`, add `--test-sensorhub --test-pluton` and choose a new report
+name to run temporary trials. The script checks the exact product/BIOS and
+module kernel version, rejects a shared SPI HID transport, reads one ALS
+sample, and attempts Pluton channel discovery once. It stops on new driver
+errors and restores the packaged SPI HID modules and unloads the trial Pluton
+module on exit. That restores the installed kernel's SPI HID modules, not an
+earlier manually loaded development build. These trials do not install a
+package or rebuild a boot image. One raw ALS sample does not establish
+calibration or response to light, and Pluton channel discovery does not prove
+PCBI service functionality. The failure-path and target checks are covered by
+`tests/test_platform.py`; the temporary trials and installed-driver checks
+completed on 2026-11-05. Reboot and PCBI service verification remain pending.
+
+The live inventory also distinguishes already-working telemetry and power
+services from unbound physical nodes. `NVDA8810` is serviced by ACPI `spbm`,
+while `NVDA6210` and `NVDA8400` have power-wrap and SSPM drivers. The P16's
+cameras enumerate through USB UVC; the candidate on-SoC ISP/CCU ACPI devices
+are absent from this machine's current firmware enumeration. IIO devices are
+collected from `/sys/bus/iio/devices`, including the camera's existing USB
+`prox` device with proximity and attention channels, and the SPI `als` device.
+Inventory does not read raw channels or establish that sensor values work.
 
 ## Supported hardware and software
 

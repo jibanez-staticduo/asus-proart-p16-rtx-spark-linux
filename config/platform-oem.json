@@ -1,0 +1,92 @@
+{
+  "schema": 1,
+  "recovery": "MyASUS_in_WinRE_For_USB_V1.0.0.521_1.exe",
+  "iso_path": "tmp/MyASUS_in_WinRE_For_USB_V1.0.0.521/A64W11_26H1_CR-ISO_H7607BA-217_02.00.iso",
+  "files": [
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvadsp.inf_arm64_bd425f1fe9369804/hifi1_cose_sign_image.bin",
+      "bytes": 723312,
+      "sha256": "f39c9ce130b3188319ae0ab2c047de6669ce2a9d8d04bfcad6f39db7c528e14b"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvadsp.inf_arm64_bd425f1fe9369804/hifi5_a_cose_sign_image.bin",
+      "bytes": 1262288,
+      "sha256": "c4d82b131e395c6e8c224acd95e9a60f763b868617682d093f3403ecd9bd0329"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvadsp.inf_arm64_bd425f1fe9369804/hifi5_b_cose_sign_image.bin",
+      "bytes": 315984,
+      "sha256": "b38a5adc77c66579421da5fd18db533084ec41e4a5e6ecab46e720f99751f94e"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvadsp.inf_arm64_bd425f1fe9369804/nvadsp.inf",
+      "bytes": 4101,
+      "sha256": "40d42cb960e56e070b0e3231675196caebef1a44c3949d084ccc1698564666a8"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvadsp.inf_arm64_bd425f1fe9369804/nvadsp.sys",
+      "bytes": 364888,
+      "sha256": "8b21e4652bb0ac178a2c470c8d6f982155e715c46112ac3b93de3ebfe00b13d6"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvscp.inf_arm64_d79e80462fadf1d5/nvSCP.inf",
+      "bytes": 2579,
+      "sha256": "8003109c979092c5416d57db81ed9c83e7bd76129bdf103512998aa36035f83d"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvscp.inf_arm64_d79e80462fadf1d5/nvSCP.sys",
+      "bytes": 333032,
+      "sha256": "d1cc1ae1a907d607ad979e84116a5febdb2f55136b612b210c68fdd57f901a47"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvsensorhubext.inf_arm64_071e74149cb7082b/nvSensorHubExt.inf",
+      "bytes": 1650,
+      "sha256": "143da1ee9af588c4eabc05a9731097ec9571e35f20d35daa14cd78ba28831d27"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvsrootmbx.inf_arm64_6ee85afcd10dd594/nvsrootmbx.inf",
+      "bytes": 2088,
+      "sha256": "ea6f08cd6a3df63f8423c11cbb5175ab794bc670c4bf5d7b6e825df5d30eaa40"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvsrootmbx.inf_arm64_6ee85afcd10dd594/nvsrootmbx.sys",
+      "bytes": 221928,
+      "sha256": "f814e861b5e076aa4e00619a8a588df3c4ae9ec2b5026c30748ba493ce0e6d8a"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvasd.inf_arm64_a7c63a043236863a/nvasd.inf",
+      "bytes": 17024,
+      "sha256": "0f0cbeee8033c7e65fb2357c9f5c559f0c57926e666ff30ef1aaa9ce47526c53"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvasd.inf_arm64_a7c63a043236863a/nvasd.cat",
+      "bytes": 12776,
+      "sha256": "5aab31fc7e4c0a573af7fc506659114cbc2943136f5d686ce2d42add9d50a430"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvasd.inf_arm64_a7c63a043236863a/MT8901ResourceConstraints.xml",
+      "bytes": 14251,
+      "sha256": "5364dc0afe72fa59905bb1a97887f82b2b63b42a7d5bf425cb688acaacad2b17"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvasd.inf_arm64_a7c63a043236863a/nvasd.sys",
+      "bytes": 1251048,
+      "sha256": "a3eaa49ea54b1a7511542091efbd527000aeff4148753e68f179077c539224de"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvpep.inf_arm64_187addb88f158186/nvpep.inf",
+      "bytes": 5480,
+      "sha256": "41267772a96a40d114aa7a3ee50f6399f9f04d01bd9da9e1a96cb31477314af2"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvpep.inf_arm64_187addb88f158186/nvpep.cat",
+      "bytes": 11272,
+      "sha256": "80159d4169b6d9423d27e9c5546fef20797288b78547f734b74284e2a5fb34c9"
+    },
+    {
+      "path": "Windows/System32/DriverStore/FileRepository/nvpep.inf_arm64_187addb88f158186/nvpep.sys",
+      "bytes": 458472,
+      "sha256": "34cf1f2a9372a092555fb0887bfb76a8f205a76ff7e557224b353b09497c9bb1"
+    }
+  ]
+}

@@ -25,7 +25,22 @@ fi
 [[ $(git -C "$target" rev-parse HEAD) == "$commit" ]] || {
   echo 'Existing build/spark_hwmon has a different commit; preserve or move it first.' >&2; exit 1;
 }
-[[ -z $(git -C "$target" status --porcelain) ]] || {
-  echo 'Existing build/spark_hwmon has local changes; preserve or move it first.' >&2; exit 1;
-}
+# Keep the pinned upstream tree plus exactly the maintained platform patch.
+python3 - "$REPO" "$target" <<'PATCH_CHECK'
+from pathlib import Path
+import subprocess
+import sys
+root, target = map(Path, sys.argv[1:])
+patch = root / 'platform/hwmon/n1x-platform.patch'
+expected = patch.read_bytes()
+actual = subprocess.check_output(['git', 'diff', '--binary', 'HEAD'], cwd=target)
+if not actual:
+    if subprocess.check_output(['git', 'status', '--porcelain'], cwd=target).strip():
+        raise SystemExit('Preserving unexpected hwmon worktree changes')
+    subprocess.run(['git', 'apply', '--check', str(patch)], cwd=target, check=True)
+    subprocess.run(['git', 'apply', str(patch)], cwd=target, check=True)
+    actual = subprocess.check_output(['git', 'diff', '--binary', 'HEAD'], cwd=target)
+if actual != expected:
+    raise SystemExit('Preserving hwmon changes that differ from the maintained patch')
+PATCH_CHECK
 printf 'Pinned source ready: %s\nAfter booting the P16 kernel: sudo %q/scripts/install-dkms.sh\n' "$commit" "$target"

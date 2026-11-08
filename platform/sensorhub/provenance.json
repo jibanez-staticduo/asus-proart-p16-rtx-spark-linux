@@ -1,0 +1,26 @@
+{
+  "source": "Existing P16 7.2.8 kernel source with repository SPI HID patch series 2111-2120 and P16 fixes",
+  "files": [
+    {
+      "path": "kernel/src/linux-7.2.8/drivers/hid/spi-hid/spi-hid-acpi.c",
+      "sha256": "0d9e639de811cf9aa6b9b8bf056ff40bb6118ee699316b8a873021e73bb1e4d4"
+    },
+    {
+      "path": "kernel/src/linux-7.2.8/drivers/hid/spi-hid/spi-hid.h",
+      "sha256": "2af9a1c759b9e782fde41718ce707f6963a27a72141e2a1d70dce6b76c850854"
+    },
+    {
+      "path": "kernel/src/linux-7.2.8/drivers/hid/spi-hid/spi-hid-core.c",
+      "sha256": "655754ab8ed32b6836768a709f36adb85683ce397ac8edf2e63cf7496b6f06ca"
+    },
+    {
+      "path": "kernel/src/linux-7.2.8/drivers/hid/spi-hid/spi-hid-core.h",
+      "sha256": "2f1afd0e42c09a1b9278ffb9b509fa741c73d98c92200e9a9492aeb42ee0d997"
+    },
+    {
+      "path": "kernel/src/linux-7.2.8/drivers/hid/spi-hid/spi-hid-trace.h",
+      "sha256": "38a9db45b7d5a05842731c0c6e2304d72f2cbe42ad78cb9b3ce0c9cfedb6c3fc"
+    }
+  ],
+  "adaptation": "Evaluate _RST on the ACPI handle directly; the acpi_device dev has no companion fwnode for device_reset(). Respect HID_INPUT_REPORT versus HID_FEATURE_REPORT, handle GET_INPUT_REPORT_RESPONSE, and keep reply copying under the output mutex. MSFW1111/VID0000/PID0100 asynchronous .request handling: the VEML3328 task ignores GET_INPUT_REPORT, so IIO pending reads are fulfilled by DATA reports; raw synchronous input ioctls return EOPNOTSUPP."
+}

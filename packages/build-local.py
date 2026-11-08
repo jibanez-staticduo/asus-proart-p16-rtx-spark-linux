@@ -24,6 +24,7 @@ PLATFORM = [
     '/etc/limine-entry-tool.d/00-omarchy-n1x-sleep.conf',
     '/etc/limine-entry-tool.d/00-omarchy-n1x-usb4.conf',
     '/etc/limine-entry-tool.d/zz-p16-keyboard.conf',
+    '/etc/limine-entry-tool.d/zz-p16-clean-menu.conf',
     '/etc/modprobe.d/nvidia.conf',
     '/etc/modprobe.d/omarchy-n1x-nvidiafb.conf',
     '/etc/systemd/system/p16-asus-controls.service',
@@ -37,6 +38,8 @@ PLATFORM = [
     '/usr/share/p16-platform/90-mkinitcpio-install.hook',
     '/usr/local/libexec/p16-charge-limit',
     '/usr/local/bin/p16-temperatures',
+    '/etc/pacman.d/hooks/95-p16-platform-update-check.hook',
+    '/usr/local/sbin/p16-platform-update-check',
 ]
 SPEAKER_FILES = json.loads(SPEAKER.read_text())['files']
 SPEAKERS = [f'/usr/lib/firmware/cirrus/{file["name"]}' for file in SPEAKER_FILES]
@@ -60,6 +63,13 @@ SOURCES = {
     '/usr/local/sbin/p16-guard-preflight': REPO / 'scripts/p16-guard-preflight',
     '/usr/share/p16-platform/90-mkinitcpio-install.hook': REPO / 'config/90-mkinitcpio-install.hook',
     '/etc/pacman.d/hooks/00-p16-guard-preflight.hook': REPO / 'config/00-p16-guard-preflight.hook',
+    '/etc/pacman.d/hooks/zz-p16-boot-menu.hook': REPO / 'config/zz-p16-boot-menu.hook',
+    '/etc/initcpio/install/p16-acpi': REPO / 'config/p16-acpi',
+    '/etc/limine-entry-tool.d/zz-p16-clean-menu.conf': REPO / 'config/zz-p16-clean-menu.conf',
+    '/etc/mkinitcpio.conf.d/zz-p16-hardware-fixes.conf': REPO / 'config/zz-p16-hardware-fixes.conf',
+    '/etc/pacman.d/hooks/95-p16-platform-update-check.hook': REPO / 'config/95-p16-platform-update-check.hook',
+    '/usr/local/sbin/p16-platform-update-check': REPO / 'scripts/p16-platform-update-check',
+    '/usr/local/sbin/p16-boot-menu-policy': REPO / 'scripts/p16-boot-menu-policy',
 }
 
 
@@ -81,7 +91,9 @@ def snapshot(name, paths):
         else:
             shutil.copy2(source, target)
         if destination in ('/usr/local/sbin/p16-mkinitcpio-managed',
-                           '/usr/local/sbin/p16-guard-preflight'):
+                           '/usr/local/sbin/p16-guard-preflight',
+                           '/usr/local/sbin/p16-platform-update-check',
+                           '/usr/local/sbin/p16-boot-menu-policy', '/etc/initcpio/install/p16-acpi'):
             target.chmod(0o755)
     if name == 'p16-speaker-firmware':
         for record in SPEAKER_FILES:
@@ -94,12 +106,15 @@ def snapshot(name, paths):
         tar.add(payload, arcname='payload')
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     backup = ' '.join(f"'{path.lstrip('/')}" + "'" for path in paths if path.startswith('/etc/'))
+    version = '1.1.5' if name == 'p16-platform-policy' else '1.0.0'
+    dependencies = "depends=('bash' 'dkms' 'mkinitcpio' 'binutils' 'n1x-sroot-provider-dkms>=0.1.0-3')" if name == 'p16-platform-policy' else ''
     (directory / 'PKGBUILD').write_text(f'''pkgname={name}
-pkgver=1.0.0
+pkgver={version}
 pkgrel=1
 pkgdesc="Local ASUS P16 update policy snapshot"
 arch=('aarch64')
 license=('custom')
+{dependencies}
 source=('payload.tar.gz')
 sha256sums=('{digest}')
 backup=({backup})
@@ -108,7 +123,7 @@ package() {{
 }}
 ''')
     subprocess.run(['makepkg', '--force', '--noconfirm'], cwd=directory, check=True)
-    for package in sorted(directory.glob(f'{name}-1.0.0-1-aarch64.pkg.tar.*')):
+    for package in sorted(directory.glob(f'{name}-{version}-1-aarch64.pkg.tar.*')):
         print(package)
 
 

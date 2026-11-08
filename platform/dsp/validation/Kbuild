@@ -1,0 +1,2 @@
+ccflags-y += -I$(src)/..
+obj-m += n1x_adsp_route_check.o n1x_adsp_primary_check.o n1x_adsp_task_check.o

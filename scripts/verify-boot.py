@@ -7,7 +7,11 @@ import re
 import struct
 import subprocess
 import tempfile
-RELEASE = '7.2.8-23-omarchy-p16-asus'
+QUALIFIED_KERNELS = {
+    '7.2.8-23-omarchy-p16-asus': 'linux-p16-asus-23',
+    '7.2.8-23-omarchy-p16-asus-npu2': 'linux-p16-asus-23-npu2',
+    '7.2.8-23-rtx-spark-npu': 'linux-rtx-spark-npu',
+}
 PINS = {'DSDT.aml': '80e0ad4a051704003d09029cb600a9814e1cd370ce774b9749dc09d2232b5aaf', 'SSDT.aml': '9b28ffc14c19f8b7ea2278de88ff9ec070f5f70401107d81fef067a916aa9695'}
 
 def sections(path):
@@ -33,9 +37,19 @@ def sections(path):
 
 def verify_image(path):
     sec = sections(path)
-    if not sec['.uname'].rstrip(b'\x00\n').decode() == RELEASE:
-        raise ValueError('Falscher Kernelrelease im UKI')
-    modules = Path('/usr/lib/modules') / RELEASE
+    release = sec['.uname'].rstrip(b'\x00\n').decode()
+    package = QUALIFIED_KERNELS.get(release)
+    if package is None:
+        if not re.fullmatch(r'[a-zA-Z0-9._+-]+', release):
+            raise ValueError('Nicht qualifizierter Kernelrelease im UKI: ' + release)
+        try:
+            package = subprocess.check_output(
+                ['pacman', '-Qoq', '/usr/lib/modules/' + release + '/vmlinuz'], text=True).strip()
+        except subprocess.CalledProcessError as error:
+            raise ValueError('Nicht qualifizierter Kernelrelease im UKI: ' + release) from error
+        if package != 'linux-p16-platform' and not package.startswith('linux-p16-platform-'):
+            raise ValueError('Kein paketierter P16-Kernel: ' + package)
+    modules = Path('/usr/lib/modules') / release
     symbols = (modules / 'build/System.map').read_text()
     if not re.search(' T arch_alloc_acpi_tables$', symbols, re.M):
         raise ValueError('ARM64-ACPI-Allocator fehlt')
@@ -68,9 +82,15 @@ def verify_image(path):
         offset = start + size + 3 & ~3
         if name == 'TRAILER!!!':
             break
-    for name, pin in PINS.items():
-        if not hashlib.sha256(files['kernel/firmware/acpi/' + name]).hexdigest() == pin:
-            raise ValueError('Falsche ACPI-Tabelle im UKI: ' + name)
+    ssdt = files.get('kernel/firmware/acpi/SSDT.aml')
+    if ssdt is None or hashlib.sha256(ssdt).hexdigest() != PINS['SSDT.aml']:
+        raise ValueError('Falsche ASUS-SSDT im UKI')
+    dsdt = files.get('kernel/firmware/acpi/DSDT.aml')
+    if dsdt is not None:
+        if package not in QUALIFIED_KERNELS.values():
+            raise ValueError('Statische DSDT mit bootabhängiger GNVS-Adresse im verwalteten UKI')
+        if hashlib.sha256(dsdt).hexdigest() != PINS['DSDT.aml']:
+            raise ValueError('Falsche Legacy-DSDT im unveränderten Recovery-UKI')
     with tempfile.NamedTemporaryFile() as tmp:
         tmp.write(data)
         tmp.flush()
@@ -79,19 +99,23 @@ def verify_image(path):
         if not '/' + module in listing:
             raise ValueError('Modul fehlt: ' + module)
     for name in ['vfat', 'autofs4', 'zram', 'nvidia', 'nvidia_drm', 'spi_hid_acpi', 'hid_asus', 'wmi', 'asus_wmi', 'asus_nb_wmi']:
-        deps = subprocess.check_output(['modprobe', '-S', RELEASE, '--show-depends', name], text=True)
+        deps = subprocess.check_output(['modprobe', '-S', release, '--show-depends', name], text=True)
         for line in deps.splitlines():
             if line.startswith('insmod '):
                 if not Path(line.split()[1]).is_file():
                     raise ValueError(line)
-        if not subprocess.check_output(['modinfo', '-k', RELEASE, '-F', 'vermagic', name], text=True).split()[0] == RELEASE:
+        if not subprocess.check_output(['modinfo', '-k', release, '-F', 'vermagic', name], text=True).split()[0] == release:
             raise ValueError('Falsche Modulversion: ' + name)
-    if not subprocess.check_output(['pacman', '-Qoq', '/usr/lib/modules/' + RELEASE + '/vmlinuz'], text=True).strip() == 'linux-p16-asus-23':
-        raise ValueError('Kernelimage gehört nicht zum P16-Paket')
+    owner = subprocess.check_output(
+        ['pacman', '-Qoq', '/usr/lib/modules/' + release + '/vmlinuz'], text=True).strip()
+    if owner != package:
+        raise ValueError(f'Kernelimage gehört {owner}, erwartet wurde {package}')
     print('UKI, ACPI-Overrides und Modulabhängigkeiten gültig:', path)
 
-def verify_menu(config_path=Path('/boot/limine.conf'), boot_root=Path('/boot')):
+def verify_menu(config_path=Path('/boot/limine.conf'), boot_root=Path('/boot'), installed_npu=None):
     config = config_path.read_text()
+    defaults = re.findall(r'^default_entry:\s*(.*?)\s*$', config, re.M)
+    clean_mode = defaults in (['Omarchy-P16'], ['Omarchy-P16-Recovery'])
     entries = []
     for line in config.splitlines():
         if line.lstrip().startswith('#'):
@@ -107,9 +131,34 @@ def verify_menu(config_path=Path('/boot/limine.conf'), boot_root=Path('/boot')):
             if hashlib.blake2b(image.read_bytes()).hexdigest() != pin.lower():
                 raise ValueError('EFI-Hash stimmt nicht: ' + path)
             entries.append(path)
-    if '/EFI/Linux/omarchy_linux-p16-asus-23.efi' not in entries:
+    if clean_mode:
+        for path in ('/EFI/Linux/omarchy_p16.efi', '/EFI/Linux/omarchy_p16-recovery.efi'):
+            if path not in entries:
+                raise ValueError('Qualifizierter P16-Boot-/Recovery-Eintrag fehlt: ' + path)
+            verify_image(boot_root / path.lstrip('/'))
+        if not re.search(r'^/' + re.escape(defaults[0]) + r'\s*$', config, re.M):
+            raise ValueError('Qualifizierter P16-Default fehlt im Menü')
+    elif '/EFI/Linux/omarchy_linux-p16-asus-23.efi' not in entries:
         raise ValueError('P16-Eintrag fehlt im Limine-Menü')
-    for key, expected in [('quiet', 'no'), ('timeout', '10')]:
+    npu_image = '/EFI/Linux/omarchy_linux-rtx-spark-npu.efi'
+    if installed_npu is None:
+        installed_npu = subprocess.run(['pacman', '-Qq', 'linux-rtx-spark-npu'],
+                                       capture_output=True).returncode == 0
+    if installed_npu and not clean_mode:
+        if npu_image not in entries:
+            raise ValueError('Installierter RTX-Spark-NPU-Kernel fehlt im Limine-Menü')
+        defaults = re.findall(r'^default_entry:\s*(.*?)\s*$', config, re.M)
+        if defaults == ['p16-native-dsdt-test']:
+            native = boot_root / 'EFI/Linux/omarchy_p16-native-dsdt-test.efi'
+            if '/EFI/Linux/omarchy_p16-native-dsdt-test.efi' not in entries:
+                raise ValueError('Native-DSDT-Default fehlt im Limine-Menü')
+            verify_image(native)
+        elif defaults != ['Omarchy/linux-rtx-spark-npu']:
+            if len(defaults) != 1 or not re.fullmatch(r'Omarchy/linux-p16-[a-z0-9-]+', defaults[0]):
+                raise ValueError('Kein qualifizierter P16-NPU-Default im Limine-Menü')
+            image = boot_root / ('EFI/Linux/omarchy_' + defaults[0].split('/', 1)[1] + '.efi')
+            verify_image(image)
+    for key, expected in [('quiet', 'no'), ('timeout', '5')]:
         values = re.findall(r'^' + key + r':\s*(.*?)\s*$', config, re.M)
         if values != [expected]:
             raise ValueError('Limine benötigt genau einmal ' + key + ': ' + expected)
@@ -117,7 +166,8 @@ def verify_menu(config_path=Path('/boot/limine.conf'), boot_root=Path('/boot')):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--image', type=Path, default=Path('/boot/EFI/Linux/omarchy_linux-p16-asus-23.efi'))
+    primary = Path('/boot/EFI/Linux/omarchy_p16.efi')
+    parser.add_argument('--image', type=Path, default=primary if primary.is_file() else Path('/boot/EFI/Linux/omarchy_linux-p16-asus-23.efi'))
     parser.add_argument('--image-only', action='store_true')
     args = parser.parse_args()
     try:

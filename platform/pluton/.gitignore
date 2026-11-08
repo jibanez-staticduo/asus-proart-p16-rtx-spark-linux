@@ -1,0 +1,12 @@
+*.o
+*.ko
+*.mod
+*.mod.c
+.*.cmd
+Module.symvers
+modules.order
+pkg/
+src/
+*.pkg.tar.*
+protocol-test
+__pycache__/

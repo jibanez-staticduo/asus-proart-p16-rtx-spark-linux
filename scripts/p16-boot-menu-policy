@@ -1,0 +1,108 @@
+#!/usr/bin/bash
+# Keep the selected P16 kernel, the recovery entry and the user's five-second menu.
+set -euo pipefail
+export PATH=/usr/bin:/bin
+[[ $EUID == 0 ]] || exit 1
+exec 9>/run/lock/boot-partition.lock
+flock -x 9
+menu=/boot/limine.conf
+mapfile -t defaults < <(sed -n 's/^default_entry:[[:space:]]*//p' "$menu")
+[[ ${#defaults[@]} == 1 ]] || { echo 'Expected one Limine default' >&2; exit 1; }
+desired=${defaults[0]}
+clean_mode=false
+case $desired in
+    Omarchy-P16|Omarchy-P16-Recovery) clean_mode=true ;;
+    p16-native-dsdt-test) ;;
+    Omarchy/linux-p16-asus-23|Omarchy/linux-p16-asus-23-npu2|Omarchy/linux-rtx-spark-npu) ;;
+    Omarchy/linux-p16-platform|Omarchy/linux-p16-platform-*)
+        /usr/local/sbin/p16-platform-update-check --image "/boot/EFI/Linux/omarchy_${desired#Omarchy/}.efi" || desired=Omarchy/linux-rtx-spark-npu ;;
+    *) echo "Unexpected Limine default: $desired" >&2; exit 1 ;;
+esac
+view=$(mktemp)
+tmp=$(mktemp /boot/.p16-limine.XXXXXX)
+cleanup() {
+    [[ ! -e $view ]] || rm -- "$view"
+    [[ ! -e $tmp ]] || rm -- "$tmp"
+}
+trap cleanup EXIT
+if $clean_mode; then
+    # limine-entry-tool can regenerate the old OS group on kernel updates.
+    # Keep only the qualified standalone entries and unrelated OS entries.
+    awk '
+      /^[[:space:]]*\/[^\/]/ {
+        name=$0
+        sub(/^[[:space:]]*\/[+]?/, "", name)
+        sub(/[[:space:]]+$/, "", name)
+        skip=(name == "Omarchy" || name == "p16-native-dsdt-test" || name == "EFI fallback")
+      }
+      !skip { print }
+    ' "$menu" > "$view"
+else
+    cp "$menu" "$view"
+fi
+# Preserve the user's original preferred default until a new kernel is selected.
+if ! $clean_mode && [[ $desired != p16-native-dsdt-test && $desired != Omarchy/linux-p16-platform && $desired != Omarchy/linux-p16-platform-* ]] && grep -Eq '^[[:space:]]*//linux-rtx-spark-npu[[:space:]]*$' "$view"; then
+    desired=Omarchy/linux-rtx-spark-npu
+fi
+if $clean_mode; then
+    grep -Eq "^/$desired[[:space:]]*$" "$view" || { echo 'Qualified P16 entry missing' >&2; exit 1; }
+elif [[ $desired == p16-native-dsdt-test ]]; then
+    grep -Eq '^/p16-native-dsdt-test[[:space:]]*$' "$view" || { echo 'Native DSDT entry missing' >&2; exit 1; }
+else
+    grep -Eq "^[[:space:]]*//${desired#Omarchy/}[[:space:]]*$" "$view" || { echo 'Default entry missing' >&2; exit 1; }
+fi
+count=0
+hashes_ok=true
+recovery_valid=false
+native_valid=false
+clean_native_valid=false
+clean_recovery_valid=false
+while read -r token; do
+    path=${token#boot\(\):}; path=${path%%#*}; digest=${token##*#}
+    [[ $digest =~ ^[0-9a-fA-F]{128}$ && $path != *..* ]] || exit 1
+    actual=$(b2sum "/boot$path" 2>/dev/null) || actual=missing
+    actual=${actual%% *}
+    if [[ $actual != "${digest,,}" ]]; then
+        echo "EFI image missing or hash mismatch: $path" >&2
+        hashes_ok=false
+    elif [[ $path == /EFI/Linux/omarchy_linux-rtx-spark-npu.efi ]]; then
+        recovery_valid=true
+    elif [[ $path == /EFI/Linux/omarchy_p16-native-dsdt-test.efi ]]; then
+        native_valid=true
+    elif [[ $path == /EFI/Linux/omarchy_p16.efi ]]; then
+        clean_native_valid=true
+    elif [[ $path == /EFI/Linux/omarchy_p16-recovery.efi ]]; then
+        clean_recovery_valid=true
+    fi
+    count=$((count + 1))
+done < <(grep -oE 'boot\(\):/EFI/Linux/[^[:space:]]+' "$view")
+((count > 0)) || exit 1
+if ! $hashes_ok; then
+    if $clean_mode; then
+        if [[ $desired == Omarchy-P16 ]] && $clean_native_valid; then
+            :
+        elif $clean_recovery_valid; then
+            desired=Omarchy-P16-Recovery
+        elif $clean_native_valid; then
+            desired=Omarchy-P16
+        else
+            echo 'No hash-validated P16 boot image; menu preserved' >&2
+            exit 1
+        fi
+    elif [[ $desired == p16-native-dsdt-test ]] && $native_valid; then
+        : # Keep the observed working image when an unrelated entry is damaged.
+    else
+        $recovery_valid || { echo 'No validated RTX recovery image; menu preserved' >&2; exit 1; }
+        desired=Omarchy/linux-rtx-spark-npu
+    fi
+fi
+[[ $(grep -c '^timeout:' "$view") == 1 ]] || exit 1
+sed -e "s|^default_entry:.*|default_entry: $desired|" -e 's/^timeout:.*/timeout: 5/' "$view" > "$tmp"
+chmod --reference="$menu" "$tmp"
+if ! cmp -s "$menu" "$tmp"; then mv -f "$tmp" "$menu"; sync -f /boot; fi
+if $hashes_ok; then
+    echo "P16 default $desired; timeout 5; $count EFI hashes valid"
+else
+    echo "P16 default restored to validated recovery $desired; EFI validation failed" >&2
+    exit 1
+fi

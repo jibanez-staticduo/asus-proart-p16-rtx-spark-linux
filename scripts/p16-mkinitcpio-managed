@@ -9,17 +9,35 @@ if [[ ${1:-} == --plan ]]; then plan=true; fi
 declare -A managed=()
 while IFS= read -r package; do
   [[ $package ]] || continue
+  case $package in linux-p16-asus-23|linux-p16-asus-23-npu2|linux-rtx-spark-npu) continue ;; esac
   pacman -Qq "$package" &>/dev/null || continue
   managed["$package"]=1
 done < <(awk '/^[[:space:]]*comment: kernel-id=/ {
   sub(/^[[:space:]]*comment: kernel-id=/, ""); print $1
 }' /boot/limine.conf | sort -u)
 
+# New P16 kernel packages participate immediately, before their first menu
+# entry exists. Earlier bring-up kernels above stay frozen as recovery.
+for base in /usr/lib/modules/*/pkgbase; do
+  package=$(<"$base")
+  [[ $package == linux-p16-platform || $package == linux-p16-platform-* ]] || continue
+  pacman -Qq "$package" &>/dev/null || continue
+  managed["$package"]=1
+done
+
 ((${#managed[@]})) || { echo 'No managed Limine kernel found.' >&2; exit 1; }
 declare -A selected=()
 broad=false
 while IFS= read -r target; do
+  # ALPM's firmware glob includes parent directories as well as changed files.
+  [[ -d /$target ]] && continue
   case $target in
+    usr/lib/firmware/nvidia/n1x/*|usr/src/n1x-scp-*/dkms.conf|usr/src/n1x-pluton-*/dkms.conf|usr/src/n1x-adsp-*/dkms.conf|usr/src/n1x-sroot-provider-*/dkms.conf)
+      # Late platform drivers are absent from stock/recovery initramfs images.
+      for package in "${!managed[@]}"; do
+        if [[ $package == linux-p16-platform || $package == linux-p16-platform-* ]]; then selected["$package"]=1; fi
+      done
+      ;;
     usr/lib/modules/*/modules.builtin|usr/lib/modules/*/pkgbase|usr/lib/modules/*/extramodules/*)
       path=${target#usr/lib/modules/}
       release=${path%%/*}
@@ -39,6 +57,17 @@ fi
 mapfile -t packages < <(printf '%s\n' "${!selected[@]}" | sort)
 echo "Rebuilding managed Limine kernels: ${packages[*]}"
 if $plan; then exit 0; fi
+# The kernel and headers must have completed DKMS installation before an image
+# can replace a working managed P16 UKI. Stock kernels retain their own path.
+for package in "${packages[@]}"; do
+  for base in /usr/lib/modules/*/pkgbase; do
+    [[ $(<"$base") == "$package" ]] || continue
+    directory=${base%/pkgbase}
+    if [[ $package == linux-p16-platform || $package == linux-p16-platform-* ]]; then
+      /usr/local/sbin/p16-platform-update-check --release "${directory##*/}"
+    fi
+  done
+done
 /usr/bin/limine-mkinitcpio "${packages[@]}"
 # The Limine wrapper can succeed after an individual kernel build failed. It
 # also deliberately keeps an identical UKI without changing its mtime, so
@@ -49,4 +78,11 @@ for package in "${packages[@]}"; do
     echo "Managed UKI or Limine entry is missing: $package" >&2
     exit 1
   }
+  for base in /usr/lib/modules/*/pkgbase; do
+    [[ $(<"$base") == "$package" ]] || continue
+    directory=${base%/pkgbase}
+    if [[ $package == linux-p16-platform || $package == linux-p16-platform-* ]]; then
+      /usr/local/sbin/p16-platform-update-check --image "$image" --release "${directory##*/}"
+    fi
+  done
 done

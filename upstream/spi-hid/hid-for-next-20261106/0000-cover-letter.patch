@@ -1,0 +1,70 @@
+From c150ef72b56e9c6f5870657f57e75e0c8048aa72 Mon Sep 17 00:00:00 2001
+From: Johann-Peter Hartmann <johannhartmann@gmail.com>
+Date: Fri, 6 Nov 2026 11:36:38 +0100
+Subject: [PATCH RFC 0/4] HID: spi-hid: reset and sensor report-transaction fixes
+
+This draft fixes GPIO IRQ lookup, ACPI reset dispatch and GET-report
+transactions, and adds a controller-ID quirk for the MSFW1111 sensor hub.
+
+The base is HID for-next commit 720806515cb6921ab05caaa6f470f7054b56385e.
+That base does not contain the SPI HID driver. The review branch imports
+the pinned June 9 SPI HID series, the coherent RX support in the SPI core,
+and the SPI HID portion of the Surface Pro 11 support patch. The latter
+two imports are limited to the SPI core, SPI HID and its input binding;
+no unrelated platform changes are included.
+
+Fixes tags name commits in this local prerequisite stack. They must be
+remapped when the maintainer selects the actual prerequisite branch.
+The prerequisite-patch-id trailers identify the tested imported stack.
+
+Validation:
+- Full ARM64 vmlinux and module links with both ACPI and OF frontends.
+- Each of the four commits builds independently in that configuration.
+- Full ARM64 built-in OF link with ACPI, DMI, PM and modules disabled.
+- No SPI HID compiler warnings. Minimal kernel builds have pre-existing
+  ARM64, proc, block and library warnings (526 warning lines in each
+  configuration, identical to the prerequisite baseline).
+- ASan/UBSan tests of the actual request/transport callbacks, including
+  deterministic concurrent raw requests. The baseline returns caller 2's
+  bytes to caller 1; the fixed callbacks preserve both complete replies.
+- Five installed-kernel header builds and 145 platform tests pass.
+
+The target kernel has not been booted on the P16. The installed transport
+has already provided live IIO readings with these functional fixes; the
+reset diagnostic has since been reduced to debug level. Other SPI HID
+hardware and runtime lockdep on this target stack are untested.
+
+Tool assistance: OpenAI Codex inspected and split the local adaptations,
+reviewed dependencies, adjusted reset logging, wrote the concurrency
+reproducer and test/build orchestration, and prepared these draft messages.
+Human review and a human DCO sign-off remain required. No sign-off or
+review tag is asserted for these four commits.
+
+Johann-Peter Hartmann (4):
+  HID: spi-hid: retry ACPI GPIO IRQ lookup at probe
+  HID: spi-hid: evaluate reset on the ACPI handle
+  HID: spi-hid: serialize and type GET report responses
+  HID: spi-hid: handle P16 stream-only input reports
+
+ drivers/hid/spi-hid/spi-hid-acpi.c | 16 ++++-
+ drivers/hid/spi-hid/spi-hid-core.c | 99 +++++++++++++++++++++---------
+ drivers/hid/spi-hid/spi-hid-core.h |  1 +
+ 3 files changed, 86 insertions(+), 30 deletions(-)
+
+
+base-commit: 720806515cb6921ab05caaa6f470f7054b56385e
+prerequisite-patch-id: beaf91cb29f3a735559a3251092ac0ac17810b10
+prerequisite-patch-id: 909ee816b83e0bc8bb4b560f8c7cc0c8109c4516
+prerequisite-patch-id: 04dc416b0dbc4aaefd90065ebe75a2d3f3616729
+prerequisite-patch-id: d2b68ee6134986443f39600f43e43fa6c1479dc3
+prerequisite-patch-id: 34fe3278319270d52b16ff2d8da40ac0d52083bd
+prerequisite-patch-id: 63efebf34fcd8e910c7df15801d5c123d8274da5
+prerequisite-patch-id: 337c1fde9f03df414253193d981f3eb2b1e83bd2
+prerequisite-patch-id: a0b2e70fdffc2b16ac8a713fc1a590ffe555a620
+prerequisite-patch-id: 842c10528c461cb18288424f52f11c2219f7bf12
+prerequisite-patch-id: 640a5340a83e843ef25eea3ffebbd29b9d17ab7f
+prerequisite-patch-id: 24d3b5644a33423d7ef532383eb5cd952f85b23e
+prerequisite-patch-id: a592127dfaf48d1c3ae67293e20e966d4d2982fb
+-- 
+2.56.0
+

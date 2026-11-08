@@ -1,0 +1,43 @@
+pkgname=n1x-pluton-dkms
+pkgver=0.2.0
+pkgrel=2
+pkgdesc='NVIDIA N1X ROT1/PFI transport and PCBI firmware queries'
+arch=('aarch64')
+url='https://github.com/johannhartmann/asus-proart-p16-rtx-spark-linux'
+license=('GPL-2.0-only')
+depends=('dkms' 'python')
+makedepends=('gcc')
+source=('n1x_pluton.c' 'n1x_pluton_protocol.h' 'n1x_pluton_uapi.h' 'Kbuild' 'dkms.conf' 'pluton-info.py' 'provenance.json' 'protocol_test.c' 'n1x-pluton.conf' 'n1x-pluton.modules' 'protocol.md' 'n1x_pcbi_protocol.h' 'test_query.py')
+sha256sums=('a7cd5cbb22867502915fcf82bb997633242b8263f5d3e6f5d48d78232c582b9b'
+            '7409eef71d8d4a9d8df65773af3a0754257d4d2635bb09f437cdd7e452fdebb6'
+            'fe33b23a549c596200a4f7aad7e83b4787a951957fe81729451b8fb49116918c'
+            'fa4d3fb4830c446fcd4506f0973bc37d100f4d9b3e0f5092661216f5035fb5a3'
+            '035262b72fdce1ffac8554acbe6a92774dac974365cf9475763440e49d22d3b6'
+            '7da2716a237aa3bde057b21b99401c0b6bd205924c3364dd4f73fb33a8967fd6'
+            '21ecb88babf7e974fb3b813361651ceb028b78dc3445ec2bde8e614ae0eae7bc'
+            '2a6865978655a1ea61f85108306c7ced9459ea7ea77be0384dac1e4b5793ea96'
+            '110b492c6e5d7c84d631d11dd5d214fe8c8cf0493bb0c03ec4293b30f6def19d'
+            'f591ac50c5d162ec0a9d6bd4d7adadb50d55f815999d875ec30ad234a9d175ad'
+            '3129448c497a1418aeb0a2710017de4bf0f2cf3c534d2aebc122227831718b93'
+            '76e1f99a3bc870dfaf0701cee6b6ed2799b99477e0ca5e379ff4abb2a08021ab'
+            '2be2bfe39eba1c8595aba6e5e7e822dfa64360e9eac28d8b0111783382b1160b')
+
+check() {
+  cd "$srcdir"
+  cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
+    -o protocol-test protocol_test.c
+  ./protocol-test
+  python test_query.py
+}
+
+package() {
+  local file
+  for file in n1x_pluton.c n1x_pluton_protocol.h n1x_pluton_uapi.h n1x_pcbi_protocol.h Kbuild dkms.conf; do
+    install -Dm644 "$srcdir/$file" "$pkgdir/usr/src/n1x-pluton-$pkgver/$file"
+  done
+  install -Dm644 "$srcdir/n1x-pluton.conf" "$pkgdir/usr/lib/modprobe.d/n1x-pluton.conf"
+  install -Dm644 "$srcdir/n1x-pluton.modules" "$pkgdir/usr/lib/modules-load.d/n1x-pluton.conf"
+  install -Dm755 "$srcdir/pluton-info.py" "$pkgdir/usr/bin/n1x-pluton-info"
+  install -Dm644 "$srcdir/protocol.md" "$pkgdir/usr/share/doc/$pkgname/protocol.md"
+  install -Dm644 "$srcdir/provenance.json" "$pkgdir/usr/share/doc/$pkgname/provenance.json"
+}

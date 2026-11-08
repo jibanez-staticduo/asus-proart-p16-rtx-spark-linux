@@ -1,0 +1,36 @@
+{
+  "upstream": "https://github.com/torvalds/linux",
+  "commit": "cad928dad9a4c26aa56b4223dc2a29bca517fb5f",
+  "fix": "iio: hid-sensor: als: scale each channel individually",
+  "files": [
+    {
+      "path": "drivers/iio/light/hid-sensor-als.c",
+      "url": "https://raw.githubusercontent.com/torvalds/linux/cad928dad9a4c26aa56b4223dc2a29bca517fb5f/drivers/iio/light/hid-sensor-als.c",
+      "git_blob": "929343e42d83450393d52d6422e867ee7c7c5790",
+      "upstream_sha256": "61c15fd8e3a3f5fa3d98d0b91cc3740f1ab76c10cd151869591c108a909ab03b",
+      "packaged_sha256": "27c00f8565c943b541341d3db85c73deda3fabdbe3891a5b425a2ccd12c36e1a"
+    },
+    {
+      "path": "drivers/iio/common/hid-sensors/hid-sensor-trigger.h",
+      "url": "https://raw.githubusercontent.com/torvalds/linux/cad928dad9a4c26aa56b4223dc2a29bca517fb5f/drivers/iio/common/hid-sensors/hid-sensor-trigger.h",
+      "git_blob": "589de858e36943d266a1e30be3953eb12b125d7f",
+      "upstream_sha256": "18310793a3daa6b470ba68646fa2984eef08ebc36170fad87c21aeca76aa7f88",
+      "packaged_sha256": "18310793a3daa6b470ba68646fa2984eef08ebc36170fad87c21aeca76aa7f88"
+    }
+  ],
+  "adaptation": "Only the relative trigger-header include is changed for the standalone DKMS layout.",
+  "descriptor_sha256": "355cca7bb4af698c6ce267a89ab26ff6ed1152cbbb7395e37151d2e7101ccdee",
+  "descriptor_exponents": {
+    "illuminance": -1,
+    "color_temperature": 0,
+    "chromaticity_x": -4,
+    "chromaticity_y": -4
+  },
+  "hardware_validated": true,
+  "hardware_result": {
+    "boot_id": "db4397f4-646b-4b7d-9831-567db6218147",
+    "module_srcversion": "C8F5A044842EF0793DB86D3",
+    "evidence": "n1x-lab/results/platform-enablement-20261106/als-upstream-trial.json",
+    "scope": "Descriptor scales and all five IIO raw channels; optical calibration unverified"
+  }
+}

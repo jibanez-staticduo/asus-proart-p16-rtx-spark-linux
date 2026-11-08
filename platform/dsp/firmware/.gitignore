@@ -1,0 +1,5 @@
+receipt.json
+src/
+pkg/
+*.pkg.tar.*
+.SRCINFO

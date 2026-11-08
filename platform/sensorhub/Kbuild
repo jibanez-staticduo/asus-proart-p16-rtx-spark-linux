@@ -1,0 +1,4 @@
+obj-m += spi-hid-acpi.o
+obj-m += spi-hid.o
+spi-hid-y := spi-hid-core.o
+CFLAGS_spi-hid-core.o := -I$(src)

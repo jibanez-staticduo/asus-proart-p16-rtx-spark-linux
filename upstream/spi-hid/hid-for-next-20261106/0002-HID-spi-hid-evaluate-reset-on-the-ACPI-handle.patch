@@ -1,0 +1,35 @@
+From efb4f9efa6d4c6d9b8c5ad61d115beb5818aaa6a Mon Sep 17 00:00:00 2001
+From: Johann-Peter Hartmann <johannhartmann@gmail.com>
+Date: Fri, 6 Nov 2026 11:32:52 +0100
+Subject: [PATCH RFC 2/4] HID: spi-hid: evaluate reset on the ACPI handle
+
+The acpi_device is the namespace device, rather than its physical SPI
+companion. Evaluate _RST using its namespace handle so reset reaches
+the firmware method checked during probe.
+
+Fixes: a79528100bca ("HID: spi_hid: add ACPI support for SPI over HID")
+---
+ drivers/hid/spi-hid/spi-hid-acpi.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/hid/spi-hid/spi-hid-acpi.c b/drivers/hid/spi-hid/spi-hid-acpi.c
+index c5abc5e30..96e764be1 100644
+--- a/drivers/hid/spi-hid/spi-hid-acpi.c
++++ b/drivers/hid/spi-hid/spi-hid-acpi.c
+@@ -185,7 +185,12 @@ static int spi_hid_acpi_deassert_reset(struct spihid_ops *ops)
+ 							struct spi_hid_acpi_config,
+ 							ops);
+ 
+-	return device_reset(&conf->adev->dev);
++	acpi_status status;
++
++	/* The namespace device has no physical-device ACPI companion. */
++	status = acpi_evaluate_object(acpi_device_handle(conf->adev), "_RST", NULL, NULL);
++	dev_dbg(&conf->adev->dev, "_RST: %s\n", acpi_format_exception(status));
++	return ACPI_FAILURE(status) ? -EIO : 0;
+ }
+ 
+ static void spi_hid_acpi_sleep_minimal_reset_delay(struct spihid_ops *ops)
+-- 
+2.56.0
+

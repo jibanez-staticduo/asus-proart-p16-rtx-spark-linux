@@ -1,0 +1,12 @@
+*.o
+*.ko
+*.mod
+*.mod.c
+.*.cmd
+Module.symvers
+modules.order
+src/
+pkg/
+*.pkg.tar.*
+.SRCINFO
+*-signed.bin

@@ -1,0 +1,182 @@
+diff --git c/dkms.conf w/dkms.conf
+index 1ca0746..8924f2a 100644
+--- c/dkms.conf
++++ w/dkms.conf
+@@ -1,5 +1,5 @@
+ PACKAGE_NAME="spbm"
+-PACKAGE_VERSION="0.3.0.rtxspark.5"
++PACKAGE_VERSION="0.3.0.n1x.6"
+ BUILT_MODULE_NAME[0]="spbm"
+ DEST_MODULE_LOCATION[0]="/kernel/drivers/hwmon/"
+ AUTOINSTALL="yes"
+diff --git c/n1x-mmio.h w/n1x-mmio.h
+index ec93640..f34cf74 100644
+--- c/n1x-mmio.h
++++ w/n1x-mmio.h
+@@ -2,7 +2,7 @@
+ #ifndef SPBM_N1X_MMIO_H
+ #define SPBM_N1X_MMIO_H
+ 
+-/* P16 H7607BA.300 only: Windows tables and local load/cap validation. */
++/* MT8901 MTEL platform-2 register layout, selected by firmware PLID. */
+ #define N1X_FIRST_LIMIT 9
+ #define N1X_LIMIT_CONFIG (HWMON_P_INPUT | HWMON_P_LABEL | HWMON_P_CAP | HWMON_P_MIN | HWMON_P_MAX)
+ static const struct {
+@@ -186,10 +186,10 @@ static int n1x_mmio_init(struct device *dev, struct n1x_priv *p, acpi_handle han
+ 	u32 low, high, ec, effective;
+ 	int i;
+ 
+-	/* Caller has checked exact model/BIOS and the recognized MTEL schema. */
++	/* Check the register-layout selector before mapping the SoC aperture. */
+ 	if (ACPI_FAILURE(acpi_evaluate_integer(handle, "PLID", NULL, &platform)) ||
+ 	    platform != 2)
+-		return dev_err_probe(dev, -ENODEV, "unvalidated N1X platform ID\n");
++		return dev_err_probe(dev, -ENODEV, "unsupported N1X platform ID\n");
+ 	p->base = devm_ioremap(dev, 0x1c238000, SPBM_SIZE);
+ 	if (!p->base)
+ 		return -ENOMEM;
+diff --git c/spbm.c w/spbm.c
+index 8e7ffa1..6056c64 100644
+--- c/spbm.c
++++ w/spbm.c
+@@ -1,33 +1,12 @@
+ // SPDX-License-Identifier: GPL-2.0
+ /*
+- * NVIDIA DGX Spark (GB10) and RTX Spark (N1X) telemetry hwmon driver
+- *
+- * Exposes the System Power Budget Manager (SPBM) shared memory as
+- * standard Linux hwmon sensors. The MTEL (NVDA8800) ACPI device
+- * provides a _DSM that describes its memory resources; this driver
+- * queries _DSM function 1 at probe time to locate the "SPBM" region
+- * by name, and _DSM function 2 to discover register offsets by their
+- * canonical names rather than hard-coding addresses.
+- *
+- * The SPBM firmware (running on MediaTek SSPM) continuously updates
+- * these registers with live power telemetry in milliwatts,
+- * cumulative energy counters in millijoules, and thermal zone
+- * temperatures in centidegrees Celsius.
+- *
+- * This driver binds as an acpi_driver to the NVDA8800 device on the
+- * ACPI bus. The device has no platform_device (missing _UID/_STA in
+- * DSDT), so a platform_driver cannot be used.
+- *
+- * Usage:
+- *   sudo modprobe spbm   (or auto-loaded via DKMS + udev)
+- *   sensors spbm-*
+- *   cat /sys/class/hwmon/hwmonN/power1_input   # microwatts
+- *
+- * Discovered by reverse-engineering the DSDT _DSM for NVDA8800.
+- * No upstream driver exists as of kernel 7.0.
++ * NVIDIA SPBM/MTEL telemetry hwmon driver.
++ * NVDA8800 supplies named resources and register offsets through _DSM.
++ * NVDA8810 selects the MT8901 telemetry ABI through PLID and its MTEL schema.
+  */
+ 
+ #include <linux/module.h>
++#include <linux/platform_device.h>
+ #include <linux/hwmon.h>
+ #include <linux/hwmon-sysfs.h>
+ #include <linux/io.h>
+@@ -35,7 +14,6 @@
+ #include <linux/list.h>
+ #include <linux/uuid.h>
+ #include <linux/units.h>
+-#include <linux/dmi.h>
+ #include <linux/mutex.h>
+ 
+ #define DRIVER_NAME	"spbm"
+@@ -504,17 +482,17 @@ static int spbm_dsm_resolve_offsets(struct device *dev, acpi_handle handle,
+ 
+ #include "n1x-acpi.h"
+ 
+-/* Only power-unit interpretation needs a validated firmware quirk. */
+-static const struct dmi_system_id n1x_power_units[] = {
+-	{
+-		.matches = {
+-			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "ASUS"),
+-			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "ProArt P16 H7607BA"),
+-			DMI_EXACT_MATCH(DMI_BIOS_VERSION, "H7607BA.300"),
+-		},
+-	},
+-	{ }
+-};
++/* PLID selects the MTEL register/telemetry ABI, independently of the host
++ * system vendor or BIOS release. Only the MT8901 (platform 2) ABI is
++ * supported by the N1X limit and power-channel implementation below.
++ */
++static bool n1x_has_power_telemetry(acpi_handle handle)
++{
++	unsigned long long platform;
++
++	return ACPI_SUCCESS(acpi_evaluate_integer(handle, "PLID", NULL, &platform)) &&
++	       platform == 2;
++}
+ 
+ struct n1x_channel {
+ 	const char *path;
+@@ -642,12 +620,13 @@ static const struct hwmon_chip_info n1x_chip = {
+ };
+ 
+ 
+-static int n1x_add(struct acpi_device *adev)
++static int n1x_probe(struct platform_device *pdev)
+ {
+-	struct device *dev = &adev->dev, *hwdev;
++	struct device *dev = &pdev->dev, *hwdev;
++	struct acpi_device *adev = ACPI_COMPANION(dev);
+ 	struct n1x_priv *p;
+ 	int i, power = 0, temp = 0;
+-	bool power_units_known = dmi_check_system(n1x_power_units);
++	bool power_units_known = n1x_has_power_telemetry(adev->handle);
+ 
+ 	if (!n1x_supported_schema(adev->handle))
+ 		return dev_err_probe(dev, -ENODEV, "unsupported RTX Spark MTEL schema\n");
+@@ -683,9 +662,10 @@ static int n1x_add(struct acpi_device *adev)
+ 
+ /* ACPI driver */
+ 
+-static int spbm_add(struct acpi_device *adev)
++static int spbm_probe(struct platform_device *pdev)
+ {
+-	struct device *dev = &adev->dev;
++	struct device *dev = &pdev->dev;
++	struct acpi_device *adev = ACPI_COMPANION(dev);
+ 	struct list_head res_list;
+ 	struct resource_entry *re;
+ 	resource_size_t phys = 0;
+@@ -693,8 +673,10 @@ static int spbm_add(struct acpi_device *adev)
+ 	struct device *hwdev;
+ 	int spbm_idx, idx = 0, ret, resolved, i, j;
+ 
++	if (!adev)
++		return -ENODEV;
+ 	if (!strcmp(acpi_device_hid(adev), "NVDA8810"))
+-		return n1x_add(adev);
++		return n1x_probe(pdev);
+ 
+ 	p = devm_kzalloc(dev, sizeof(*p), GFP_KERNEL);
+ 	if (!p)
+@@ -876,16 +858,16 @@ static const struct acpi_device_id spbm_acpi_ids[] = {
+ };
+ MODULE_DEVICE_TABLE(acpi, spbm_acpi_ids);
+ 
+-static struct acpi_driver spbm_driver = {
+-	.name = DRIVER_NAME,
+-	.ids = spbm_acpi_ids,
+-	.ops = {
+-		.add = spbm_add,
++static struct platform_driver spbm_driver = {
++	.probe = spbm_probe,
++	.driver = {
++		.name = DRIVER_NAME,
++		.acpi_match_table = spbm_acpi_ids,
+ 	},
+ };
+-module_acpi_driver(spbm_driver);
++module_platform_driver(spbm_driver);
+ 
+ MODULE_LICENSE("GPL");
+-MODULE_VERSION("0.3.0.rtxspark.5");
++MODULE_VERSION("0.3.0.n1x.6");
+ MODULE_AUTHOR("Antheas Kapenekakis <antheas@cs.aau.dk>");
+ MODULE_DESCRIPTION("NVIDIA DGX Spark and RTX Spark N1X telemetry hwmon driver");

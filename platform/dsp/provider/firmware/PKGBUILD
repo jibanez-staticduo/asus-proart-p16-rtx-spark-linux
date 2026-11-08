@@ -1,0 +1,15 @@
+pkgname=n1x-sroot-firmware-local
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Locally extracted NVIDIA N1X secure-loader firmware for the P16'
+arch=('any')
+license=('custom')
+source=('sroot-v0.bin' 'sroot-v1.bin')
+sha256sums=('0f16911cced7bb95773da5aff9d9a44dfd1b1a11f3c560ee698a5c99310ff2c4'
+            '6b1e8192fc1e61944e9b2a84251b7d18f305025ffb2cfa1de8677f8f98b59ad4')
+package() {
+  local file
+  for file in "${source[@]}"; do
+    install -Dm644 "$srcdir/$file" "$pkgdir/usr/lib/firmware/nvidia/n1x/$file"
+  done
+}

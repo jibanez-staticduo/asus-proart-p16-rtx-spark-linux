@@ -15,7 +15,7 @@ They describe what was tested, not certification of every distro or BIOS.
 | Audio | DAPM route correction and local PipeWire graph work after boot; jack switching exercised | OEM-derived tuning is not redistributed; see audio guide for the public configuration's validation scope |
 | Telemetry | Production firmware parsing, probe-policy and RAM-backed MMIO tests; exported patch compiles against the running Linux 7.3 headers; driver loaded on this hardware | Channel availability depends on firmware; absolute energy calibration and inherited diagnostic interpretation remain limited |
 | Keys | Fn+Esc and ASUS application key received/usable | Fn+F7 external display selection awaits an external monitor |
-| Bluetooth | Controller powered after the sensor-resume cycle | One opcode0x0c24 warning during suspend entry; peripheral reconnection not validated |
+| Bluetooth / USB | A later manual s2idle cycle kept a connected USB 3 device readable and restored AirPods audio without manual reconnection | One test cycle; USB4/external display paths and broad peripheral coverage remain unvalidated |
 
 BIOS eligibility is intentionally not a version whitelist. The code still
 checks model/platform and relevant firmware contracts. This does not mean
@@ -39,3 +39,38 @@ hardware power draw, wake reliability or audio tuning quality.
 - Audio route patch applies cleanly to that tree; the public graph and
   hardware-gate export checks pass. The neutral graph has not had an isolated
   runtime/audio validation or physical listening test.
+
+## MT7925 follow-up validation (2026-11-07)
+
+The unmodified upstream MLO correction was fully compiled and booted in an
+isolated ARM64 kernel using the same Linux 7.3 base and P16 patch set. Both
+5975 MHz and 5500 MHz links were active. Over 120 seconds, simultaneous ping
+tests received 240/240 replies each from the gateway, a LAN host and Internet
+through VPN: mean latencies 10.6/10.9/15.0 ms, with isolated peaks near 274 ms.
+A separate 180-second operator walk received 360/360 gateway, 359/360 LAN and
+360/360 Internet replies, means 5.3/6.5/9.8 ms and maximum near 107 ms.
+No reconnects occurred during those intervals. The walk retained the same AP,
+so inter-AP roaming was not validated. Initial supplicant scan/link/group-key
+warnings remain; suspend/resume with this Wi-Fi change is still untested.
+These observations do not establish that all MT7925 problems are fixed.
+
+The compact export remains a separate source-tested patch combination, not a
+claim of a full standalone build or physical qualification of every feature.
+Only the H7607BA BIOS 303 20-CPU configuration has been physically tested here;
+18-CPU N1X variants remain outside the current coordinated-sleep admission.
+
+## Independent sleep report (2026-11-08)
+
+A [second H7607BA BIOS 303 owner reported](https://github.com/omacom/omarchy-pkgs/pull/1958#issuecomment-6715195039)
+that the identical 1120-1125 sleep patches changed immediate wake after about
+4-6 seconds into sustained s2idle. Their two usable energy intervals measured
+approximately 1.546 W over 3 h 17 min and 1.559 W over 33 min. This is an
+independent report on another 20-CPU unit, not an additional measurement on
+the laptop used for this export. Their other test series served as controls;
+read the linked report for the complete setup and attribution.
+
+That owner also reported RTC alarms not waking the patched machine and one
+early wake involving a USB mouse receiver. Stock behavior cannot be compared
+for timed wake because it woke immediately. Timed RTC wake is not validated
+by this export; USB receivers and other wake sources may affect sleep. These
+observations do not establish a firmware root cause or a new fix.
