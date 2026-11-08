@@ -106,7 +106,7 @@ external-display action still needs validation with a connected monitor.
 Use `s2idle` (`cat /sys/power/mem_sleep` shows the selected mode in brackets).
 The coordinated path matches ASUS ProArt P16 plus the N1X ACPI device; it is
 not pinned to a BIOS number. OSLPI acknowledgement, PSCI OSI availability,
-complete 20-CPU topology and firmware state contracts must still pass. Other
+complete CPU coverage and the expected firmware state contracts must still pass. Other
 firmware can be rejected safely rather than entering an incompatible hierarchy.
 Ordinary CPU idle does not use the coordinated shared-domain suspend states.
 
@@ -135,8 +135,16 @@ passes pending/published membership, absent station/BSS, duplicates, capacity,
 primary fallback and both real add-time caller checks. `check.sh` includes it.
 See the validation record for measured connectivity and remaining limits.
 
-The coordinated-sleep series currently admits the tested 20-CPU topology.
-N1X also has 18-CPU SKUs; those are not physically validated by this export and
-retain the normal non-coordinated fallback without retrying permanent admission
-failure until their topology contract
-is supported and tested. CPU count alone does not establish compatibility.
+The coordinated-sleep series admits 18- and 20-CPU N1X configurations when
+all existing hardware, ACPI/LPI hierarchy, register, state and CPU-coverage
+checks pass. The 18-CPU admission is tentative: it assumes those SKUs retain
+the same firmware contracts with two fewer CPUs. Physical validation here is
+limited to the 20-CPU H7607BA BIOS 303 configuration; accepting a CPU count is
+not a claim of working sleep or power draw on an 18-CPU unit. Other CPU counts
+and incompatible firmware retain the normal non-coordinated fallback.
+
+An owner of an 18-CPU model can help validate this assumption by sharing the
+exact model/BIOS, `lscpu`, the boot log containing the coordinated-admission
+message, and results from a manually controlled suspend/resume test. Review
+logs for personal identifiers before sharing. A prepared firmware-table capture
+with its ACPI/LPI and CPU topology would permit a direct structural comparison.

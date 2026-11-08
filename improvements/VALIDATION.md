@@ -57,7 +57,8 @@ These observations do not establish that all MT7925 problems are fixed.
 The compact export remains a separate source-tested patch combination, not a
 claim of a full standalone build or physical qualification of every feature.
 Only the H7607BA BIOS 303 20-CPU configuration has been physically tested here;
-18-CPU N1X variants remain outside the current coordinated-sleep admission.
+18-CPU N1X admission is tentative and depends on the same structural firmware
+checks; no 18-CPU physical boot, suspend, resume or power result is available.
 
 ## Independent sleep report (2026-11-08)
 
