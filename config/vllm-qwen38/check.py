@@ -10,6 +10,7 @@ from pathlib import Path
 import re
 import subprocess
 from checkpoint import tensor_inventory, verify_manifest
+from kernel_policy import report_path, validate_settings, autotune_enabled
 
 BASE = Path(__file__).resolve().parent
 
@@ -67,12 +68,19 @@ def check_command(command):
     method = values["--speculative-config.method"]
     if method == "dflash" and int(values["--speculative-config.num_speculative_tokens"]) != 7:
         raise ValueError("This DFlash2 checkpoint requires seven draft tokens")
+    if values.get("--speculative-config.quantization") not in (None, "fp8_per_tensor"):
+        raise ValueError("Draft online FP8 uses fp8_per_tensor in this runtime")
     for flag in ("--max-model-len", "--max-num-seqs", "--max-num-batched-tokens", "--kv-cache-memory-bytes"):
         if int(values[flag]) < 1:
             raise ValueError(f"Expected positive integer: {flag}")
     if not 0 < float(values["--gpu-memory-utilization"]) <= 1:
         raise ValueError("Invalid GPU memory fraction")
     kernel = json.loads(values["--kernel-config"])
+    validate_settings(kernel)
+    autotune_enabled()
+    for name in ("nvfp4_dynamic_max_tokens", "nvfp4_dynamic_silu_max_tokens"):
+        if name in kernel and (type(kernel[name]) is not int or not 0 <= kernel[name] <= 16):
+            raise ValueError(f"Invalid NVFP4 cutoff: {name}")
     backends = set(kernel.get("linear_backend_per_quant", {}).values())
     backends.add(kernel.get("linear_backend", "auto"))
     if "b12x" in backends:
@@ -124,6 +132,16 @@ def main():
         from vllm.config import CompilationConfig, KernelConfig
         KernelConfig(**kernel)
         CompilationConfig(**graphs)
+        from vllm.entrypoints.common.cli_args import make_arg_parser, validate_parsed_serve_args
+        from vllm.utils.argparse_utils import FlexibleArgumentParser
+        from vllm.engine.arg_utils import AsyncEngineArgs
+        native_args = make_arg_parser(FlexibleArgumentParser()).parse_args(command["argv"][2:])
+        validate_parsed_serve_args(native_args)
+        AsyncEngineArgs.from_cli_args(native_args)
+        if values.get("--speculative-config.quantization") == "fp8_per_tensor":
+            from vllm.config.quantization import resolve_quantization_config
+            from vllm.model_executor.layers.quantization.online.base import OnlineQuantizationConfig
+            OnlineQuantizationConfig(resolve_quantization_config("fp8_per_tensor", None))
         if kernel.get("linear_backend") == "nvfp4_dynamic":
             import flashinfer
             from vllm.model_executor.kernels.linear.nvfp4.dynamic_backends import get_dynamic_backend
@@ -138,6 +156,9 @@ def main():
     print(json.dumps({"model_metadata": "passed", "package_versions": count,
                       "vllm_schemas": args.schemas, "runner": "V2",
                       "weights_loaded": False, "engine_created": False,
+                      "draft_quantization": values.get("--speculative-config.quantization", "bf16"),
+                      "kernel_qualification_report": str(report_path()),
+                      "kernel_qualification_run_by_check": False,
                       "inference_tested": False, "performance_measured": False}, indent=2))
 
 

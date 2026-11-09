@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
 set -euo pipefail
+source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+if [[ $# != 0 && ( $# != 1 || $1 != --print-config ) ]]; then
+  printf 'Usage: %s [--print-config]\n' "$0" >&2
+  exit 2
+fi
 
 for name in VLLM_VENV VLLM_TARGET_MODEL VLLM_DRAFT_MODEL VLLM_CACHE_DIR; do
   if [[ -z ${!name:-} ]]; then
@@ -17,20 +22,28 @@ export TRITON_CACHE_DIR="$VLLM_CACHE_DIR/triton"
 export CUDA_CACHE_PATH="$VLLM_CACHE_DIR/cuda"
 export VLLM_NO_USAGE_STATS=1
 export VLLM_USE_V2_MODEL_RUNNER=1
-export OMP_NUM_THREADS=${OMP_NUM_THREADS:-8}
+export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 export TOKENIZERS_PARALLELISM=false
 
 speculation=${VLLM_SPEC_METHOD:-dflash}
 case $speculation in
   dflash) draft_args=(--speculative-config.model "$VLLM_DRAFT_MODEL"
       --speculative-config.num_speculative_tokens 7
-      --speculative-config.draft_sample_method probabilistic
-      --speculative-config.rejection_sample_method standard) ;;
+      --speculative-config.draft_sample_method "${VLLM_DRAFT_SAMPLE_METHOD:-greedy}"
+      --speculative-config.rejection_sample_method standard)
+    case ${VLLM_DRAFT_QUANTIZATION:-fp8_per_tensor} in
+      fp8_per_tensor) draft_args+=(--speculative-config.quantization fp8_per_tensor) ;;
+      bf16) ;;
+      *) printf 'Unsupported draft quantization: %s\n' "$VLLM_DRAFT_QUANTIZATION" >&2; exit 2 ;;
+    esac ;;
   mtp) draft_args=(--speculative-config.num_speculative_tokens 3) ;;
   *) printf 'Unsupported speculative method: %s\n' "$speculation" >&2; exit 2 ;;
 esac
 
-kernel=${VLLM_KERNEL_CONFIG:-'{"linear_backend":"nvfp4_dynamic","nvfp4_dynamic_max_tokens":16,"unquantized_linear_backend":"flashinfer_cudnn","linear_backend_per_quant":{"fp8_w8a8":"cutlass"},"enable_flashinfer_autotune":true}'}
+if [[ $# == 0 ]]; then
+  "$VLLM_VENV/bin/python" "$source_dir/qualify-kernels.py"
+fi
+kernel=$("$VLLM_VENV/bin/python" "$source_dir/kernel_policy.py")
 graphs=${VLLM_COMPILATION_CONFIG:-'{"decode_cudagraph_capture_request_sizes":[1,2,4,8],"prefill_cudagraph_capture_token_sizes":[512,1024,2048,4096,8192]}'}
 
 args=(serve \
@@ -54,9 +67,5 @@ if [[ ${1:-} == --print-config ]]; then
   "$VLLM_VENV/bin/python" -c 'import json,os,sys; print(json.dumps({"argv":sys.argv[1:],"runner":os.environ["VLLM_USE_V2_MODEL_RUNNER"]},indent=2))' \
     "$VLLM_VENV/bin/vllm" "${args[@]}"
   exit
-fi
-if [[ $# != 0 ]]; then
-  printf 'Usage: %s [--print-config]\n' "$0" >&2
-  exit 2
 fi
 exec "$VLLM_VENV/bin/vllm" "${args[@]}"

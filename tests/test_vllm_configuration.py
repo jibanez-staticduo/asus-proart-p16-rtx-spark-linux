@@ -13,6 +13,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from unittest.mock import patch
 
 SOURCE = Path(__file__).resolve().parents[1] / "config/vllm-qwen38"
 sys.path.insert(0, str(SOURCE))
@@ -20,6 +21,7 @@ spec = importlib.util.spec_from_file_location("vllm_setup_check", SOURCE / "chec
 CHECK = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(CHECK)
 from checkpoint import tensor_inventory, verify_manifest, write_provenance
+import kernel_policy
 
 
 def small_checkpoint(path, config=None):
@@ -48,7 +50,9 @@ class VllmConfigurationTests(unittest.TestCase):
                     "VLLM_USE_V2_MODEL_RUNNER": "0"}
         for key in ("VLLM_SPEC_METHOD", "VLLM_KERNEL_CONFIG", "VLLM_COMPILATION_CONFIG",
                     "VLLM_MAX_MODEL_LEN", "VLLM_MAX_NUM_SEQS", "VLLM_MAX_BATCHED_TOKENS",
-                    "VLLM_KV_CACHE_BYTES", "VLLM_GPU_MEMORY_UTILIZATION"):
+                    "VLLM_KV_CACHE_BYTES", "VLLM_GPU_MEMORY_UTILIZATION",
+                    "VLLM_DRAFT_QUANTIZATION", "VLLM_NVFP4_LINEAR_CUTOFF",
+                    "VLLM_NVFP4_SILU_CUTOFF", "VLLM_NVFP4_AUTOTUNE"):
             self.env.pop(key, None)
 
     def render(self, **changes):
@@ -67,6 +71,9 @@ class VllmConfigurationTests(unittest.TestCase):
         self.assertNotIn("max_cudagraph_capture_size", graphs)
         self.assertNotIn("fuse_act_quant", graphs.get("pass_config", {}))
         self.assertEqual(json.loads(values["--kernel-config"])["linear_backend"], "nvfp4_dynamic")
+        self.assertEqual(values["--speculative-config.quantization"], "fp8_per_tensor")
+        self.assertEqual(json.loads(values["--kernel-config"])["nvfp4_dynamic_max_tokens"], 0)
+        self.assertEqual(json.loads(values["--kernel-config"])["nvfp4_dynamic_silu_max_tokens"], 16)
 
     def test_v1_and_graphs_too_small_for_concurrency_are_rejected(self):
         command = self.render()
@@ -81,6 +88,25 @@ class VllmConfigurationTests(unittest.TestCase):
         values, _, _ = CHECK.check_command(command)
         self.assertEqual(values["--speculative-config.num_speculative_tokens"], "3")
         self.assertNotIn("--speculative-config.model", command["argv"])
+        self.assertNotIn("--speculative-config.quantization", command["argv"])
+
+    def test_draft_precision_and_separate_cutoffs_can_be_selected(self):
+        command = self.render(VLLM_DRAFT_QUANTIZATION="bf16", VLLM_NVFP4_LINEAR_CUTOFF="4",
+                              VLLM_NVFP4_SILU_CUTOFF="8")
+        values, kernel, _ = CHECK.check_command(command)
+        self.assertNotIn("--speculative-config.quantization", values)
+        self.assertEqual(kernel["nvfp4_dynamic_max_tokens"], 4)
+        self.assertEqual(kernel["nvfp4_dynamic_silu_max_tokens"], 8)
+        with self.assertRaisesRegex(ValueError, "cutoff"):
+            CHECK.check_command(self.render(VLLM_NVFP4_LINEAR_CUTOFF="17"))
+
+    def test_qualification_failure_prevents_exec_of_vllm(self):
+        python = self.venv / "bin/python"
+        python.unlink()
+        python.write_text('#!/bin/sh\ncase "$1" in */qualify-kernels.py) exit 67;; *) exit 68;; esac\n')
+        python.chmod(0o755)
+        result = subprocess.run(["bash", str(SOURCE / "serve.sh")], env=self.env, capture_output=True)
+        self.assertEqual(result.returncode, 67)
 
     def test_unknown_mode_cannot_launch_a_server(self):
         result = subprocess.run(["bash", str(SOURCE / "serve.sh"), "--check-and-start"],
@@ -270,6 +296,34 @@ class NativeWheelBuildTests(unittest.TestCase):
             patch.write_text(patch.read_text() + "\n")
             with self.assertRaisesRegex(ValueError, "Patch SHA-256"):
                 build.build(artifacts)
+
+
+class KernelPolicyTests(unittest.TestCase):
+    def test_cutoff_uses_measured_improvement_and_rejects_noise(self):
+        rows = [{"m": 1, "a4_ms": 1, "a16_ms": .8},
+                {"m": 2, "a4_ms": 1, "a16_ms": .8},
+                {"m": 4, "a4_ms": 1, "a16_ms": 1.5}]
+        self.assertEqual(kernel_policy.choose_cutoff(rows), 2)
+        self.assertEqual(kernel_policy.choose_cutoff([{"m": 1, "a4_ms": 1, "a16_ms": .99}]), 0)
+        with self.assertRaises(ValueError):
+            kernel_policy.choose_cutoff([])
+
+    def test_saved_qualification_requires_matching_software_settings_and_mode(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+                "VLLM_CACHE_DIR": directory, "VLLM_NVFP4_AUTOTUNE": "1"}, clear=False):
+            requested = {"linear_backend": "nvfp4_dynamic", "nvfp4_dynamic_max_tokens": 0}
+            selected = {**requested, "nvfp4_dynamic_silu_max_tokens": 8}
+            report = {"passed": True, "requested_kernel": requested, "kernel_config": selected,
+                      "software_fingerprint": "current", "autotune": True}
+            kernel_policy.report_path().write_text(json.dumps(report))
+            with patch.object(kernel_policy, "requested_settings", return_value=requested), \
+                    patch.object(kernel_policy, "software_fingerprint", return_value="current"):
+                self.assertEqual(kernel_policy.resolved_settings(), selected)
+                with patch.dict(os.environ, {"VLLM_NVFP4_AUTOTUNE": "0"}):
+                    self.assertEqual(kernel_policy.resolved_settings(), requested)
+            with patch.object(kernel_policy, "requested_settings", return_value=requested), \
+                    patch.object(kernel_policy, "software_fingerprint", return_value="changed"):
+                self.assertEqual(kernel_policy.resolved_settings(), requested)
 
 
 if __name__ == "__main__":

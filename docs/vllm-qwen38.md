@@ -89,7 +89,15 @@ file. No stage writes kernel, firmware, boot or GPU power settings.
 ## Operating profiles
 
 The default uses DFlash2 with seven draft tokens and standard rejection
-sampling. It selects V2 decode graphs for 1, 2, 4 and 8 requests and prefill
+sampling. Eligible draft linear layers use online FP8 quantization via
+`--speculative-config.quantization fp8_per_tensor`; the pinned source checkpoint
+remains BF16 on disk. This is draft-only: the Unsloth target retains its mixed
+NVFP4/FP8 scheme. Candidate-selector codebooks and layers the model leaves
+unquantized retain their original precision. Set `VLLM_DRAFT_QUANTIZATION=bf16`
+to compare with the unquantized drafter. The older `fp8` online shorthand is
+not used by this profile.
+
+It selects V2 decode graphs for 1, 2, 4 and 8 requests and prefill
 graphs for 512, 1024, 2048, 4096 and 8192 tokens. FlashInfer autotuning is enabled.
 
 `environment.example` exposes the context length, sequence count, prefill batch
@@ -124,9 +132,10 @@ After a later explicit start, the intended endpoint is
 
 The native wheel backports NVIDIA's dynamic W4A4/W4A16 selection, independent
 unquantized-linear selection and the FlashInfer cuDNN BF16 backend. Its source
-references and patch hashes are recorded in `build-profile.json`. The default
-selects W4A16 for up to 16 activation rows and W4A4 above that cutoff, sharing
-one canonical weight representation. W4A4 uses FlashInfer CUTLASS; the mixed
+references and patch hashes are recorded in `build-profile.json`. The initial
+policy uses ordinary-linear cutoff 0 and SiLU/down cutoff 16, sharing one
+canonical weight representation. These are independent inputs, not measured
+optimal N1X cutoffs. W4A4 uses FlashInfer CUTLASS; the mixed
 checkpoint's FP8 layers retain CUTLASS. Eligible narrow BF16 projections use
 FlashInfer cuDNN, with the existing automatic fallback for other shapes.
 
@@ -140,7 +149,50 @@ only when the service is explicitly started, never during installation.
 The base includes the DFlash2 sliding-window/prefix-cache correction.
 `VLLM_KERNEL_CONFIG` and
 `VLLM_COMPILATION_CONFIG` can override their JSON configurations; `check`
-validates these against the pinned vLLM schemas before installation.
+validates these against the pinned vLLM schemas and native serve CLI before
+installation. Kernel overrides must retain dynamic NVFP4, CUTLASS FP8 and
+cuDNN BF16 for the qualification runner.
+
+## Qualification on an explicit start
+
+The launcher's no-argument execution first runs `qualify-kernels.py` in a
+separate process. Installation, `check` and `serve.sh --print-config` never run
+this CUDA program. The service remains stopped until explicitly started.
+
+Qualification uses synthetic packed FP4 weights with the target's gate/up and
+down dimensions. It constructs no model, loads no checkpoint tensors and
+creates no vLLM engine. An independent E2M1 decoder and scale-layout inverse
+produce FP32 references. Eager results and CUDA graph replay must agree within
+`atol=0.03, rtol=0.01`, including changed live scales. The fused activation has
+an additional normalized quantization-error bound of 0.18. CUTLASS FP8 and
+cuDNN BF16 receive their own reference checks. Any failure prevents vLLM from
+executing.
+
+For M=1,2,4,8,16 the runner measures A4 and A16 separately for gate/up and
+SiLU/down after warming the kernels through the server's FlashInfer managed
+autotune cache and token buckets: three rounds of ten CUDA graph replays per
+candidate. It chooses
+the cutoff minimizing total latency across those equally weighted shapes,
+requiring at least a 3% gain over fixed W4A4. M=17 and 32 also exercise the
+W4A4 path. This is local component tuning, not an end-to-end workload or TPS
+benchmark. Full generation correctness and speculative acceptance still need
+a later model run.
+
+The DFlash drafter uses greedy sampling by default, matching the published
+Windows N1X code benchmark. `VLLM_DRAFT_SAMPLE_METHOD=probabilistic` selects
+probabilistic drafting. This changes the draft proposals, not the target
+model's requested sampling distribution.
+
+`$VLLM_CACHE_DIR/kernel-qualification.json` records results, timings, GPU UUID,
+selected cutoffs and software fingerprint. A matching successful report is
+reused. Changes to the device, package versions, driver, power profile, model
+dimensions, requested kernel settings or qualification code invalidate it.
+`--print-config` displays the selected policy when a matching report exists;
+otherwise it displays the initial policy.
+
+`VLLM_NVFP4_LINEAR_CUTOFF` and `VLLM_NVFP4_SILU_CUTOFF` set independent initial
+values in 0..16. `VLLM_NVFP4_AUTOTUNE=0` preserves them while retaining numeric
+qualification. None of these settings starts the service.
 
 FlashInfer-b12x is distinct from the optional native `b12x` package.
 Selecting the latter requires a separately installed package; preflight rejects

@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 import os
+import importlib.util
+import sys
 
 if os.environ.get("CUDA_VISIBLE_DEVICES") != "":
     raise RuntimeError("Run with CUDA_VISIBLE_DEVICES='' to exclude GPU execution")
@@ -157,10 +159,29 @@ def check_logits_warmup_is_bounded():
     assert not buckets
 
 
+def check_qualification_reference_on_cpu():
+    source = Path(__file__).resolve().parents[1] / "config/vllm-qwen38"
+    sys.path.insert(0, str(source))
+    spec = importlib.util.spec_from_file_location("qualification", source / "qualify-kernels.py")
+    qualification = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(qualification)
+    packed = torch.tensor([[0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE]], dtype=torch.uint8)
+    decoded = qualification.dequantize_fp4(packed, torch.tensor([[2.]]))
+    expected = torch.tensor([[0, 1, 2, 3, 4, 6, 8, 12, 0, -1, -2, -3, -4, -6, -8, -12.]])
+    torch.testing.assert_close(decoded, expected)
+    chunked = qualification.dequantize_fp4(packed.repeat(257, 1), torch.full((257, 1), 2.))
+    torch.testing.assert_close(chunked, expected.repeat(257, 1))
+    scales = (torch.arange(128 * 4).reshape(128, 4) % 7).to(torch.float8_e4m3fn)
+    swizzled = scales.reshape(1, 4, 32, 1, 4).permute(0, 3, 2, 1, 4).contiguous()
+    restored = qualification.unswizzle_scales(swizzled, 128, 4)
+    torch.testing.assert_close(restored.float(), scales.float())
+
+
 check_precision_dispatch()
 check_qwen_mlp_fusion()
 check_warmup_coverage()
 check_logits_warmup_is_bounded()
+check_qualification_reference_on_cpu()
 if torch.cuda.is_initialized():
     raise AssertionError("Offline checks initialized CUDA")
 print("Passed: precision dispatch, Unsloth MLP fusion and complete small-M warmup coverage; no GPU, model or engine.")

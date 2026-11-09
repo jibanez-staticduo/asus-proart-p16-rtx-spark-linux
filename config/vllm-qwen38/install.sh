@@ -74,7 +74,7 @@ case ${1:-} in
     [[ ! -f $installed ]] || { echo 'Launcher path is a file; configuration preserved.' >&2; exit 1; }
     install -d "$installed"
     if [[ $source_dir != "$installed" ]]; then
-      for file in serve.sh check.py checkpoint.py build-wheel.py build-profile.json install.sh prepare-checkpoint.py models.json client-presets.json requirements.lock environment.example vllm-qwen38.service; do
+      for file in serve.sh check.py checkpoint.py kernel_policy.py qualify-kernels.py build-wheel.py build-profile.json install.sh prepare-checkpoint.py models.json client-presets.json requirements.lock environment.example vllm-qwen38.service; do
         install -m644 "$source_dir/$file" "$installed/$file"
       done
       install -d "$installed/patches"
