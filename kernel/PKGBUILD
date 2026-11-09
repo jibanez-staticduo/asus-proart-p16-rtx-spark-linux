@@ -2,7 +2,7 @@
 # Adopted from the Arch Linux linux package.
 
 # Dedicated P16 package; generation-23 kernels remain separate recovery packages.
-pkgrel=${P16_KERNEL_RELEASE:-26}
+pkgrel=${P16_KERNEL_RELEASE:-27}
 [[ $pkgrel =~ ^[1-9][0-9]*$ ]] || { echo 'P16_KERNEL_RELEASE must be a positive integer' >&2; exit 1; }
 pkgbase=linux-p16-platform
 _kernel=$pkgbase
