@@ -91,3 +91,21 @@ prepare
                            env=env, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             self.assertEqual((tree/'version').read_text().strip(), '7.2.8-29-rtx-spark-npu')
             self.assertFalse((tree/'localversion.40-asus').exists())
+
+    def test_staged_vendor_helpers_remain_executable(self):
+        spec = importlib.util.spec_from_file_location(
+            'platform_candidate', ROOT/'scripts/prepare-platform-candidate.py')
+        platform = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(platform)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root/'pahole.sh'
+            source.write_text('#!/bin/sh\nexit 0\n')
+            source.chmod(0o755)
+            output = root/'candidate'
+            target = output/'nvidia/kernel-open/pahole.sh'
+            records = {}
+            platform.copy_input(source, target, records, output)
+            subprocess.run([str(target)], check=True)
+            self.assertEqual(records[str(target.relative_to(output))],
+                             hashlib.sha256(source.read_bytes()).hexdigest())

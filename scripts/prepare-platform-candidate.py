@@ -61,6 +61,7 @@ def copy_input(source, target, recorded, output):
     target.parent.mkdir(parents=True, exist_ok=True)
     raw = source.read_bytes()
     target.write_bytes(raw)
+    target.chmod(source.stat().st_mode & 0o777)
     recorded[str(target.relative_to(output))] = hashlib.sha256(raw).hexdigest()
 
 
