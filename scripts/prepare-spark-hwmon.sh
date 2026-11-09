@@ -38,7 +38,7 @@ if not actual:
     if subprocess.check_output(['git', 'status', '--porcelain'], cwd=target).strip():
         raise SystemExit('Preserving unexpected hwmon worktree changes')
     subprocess.run(['git', 'apply', '--check', str(patch)], cwd=target, check=True)
-    subprocess.run(['git', 'apply', str(patch)], cwd=target, check=True)
+    subprocess.run(['git', 'apply', '--intent-to-add', str(patch)], cwd=target, check=True)
     actual = subprocess.check_output(['git', 'diff', '--binary', 'HEAD'], cwd=target)
 if actual != expected:
     raise SystemExit('Preserving hwmon changes that differ from the maintained patch')

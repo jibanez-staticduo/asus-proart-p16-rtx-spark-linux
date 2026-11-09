@@ -1,7 +1,7 @@
 # SPI HID patch review
 
-These four unsent patches separate the P16 ACPI IRQ, reset, report transaction
-and stream-only sensor fixes. `series` specifies their application order.
+These five unsent patches separate the ACPI IRQ, reset, report transaction,
+stream-only sensor and decoded input-body fixes. `series` specifies their application order.
 `baseline.json` pins every prerequisite and records the hashes of the baseline
 and resulting source files. Reapplying the series reproduces all five packaged
 SPI HID source files byte for byte.
@@ -25,7 +25,7 @@ provides multi-lane transfers and coherent receive buffers. Those dependencies
 are required; these are not standalone patches against an unmodified Linux
 tree. Existing author and license notices are preserved.
 
-The four fixes are:
+The five fixes are:
 
 1. Retry a missing ACPI GPIO IRQ at probe, including deferred-probe propagation.
 2. Evaluate `_RST` using the ACPI namespace handle.
@@ -34,6 +34,8 @@ The four fixes are:
 4. Restrict stream-only input handling to the `MSFW1111` sensor controller (HID VID 0000, PID 0100). Its
    asynchronous DATA reports complete HID sensor reads; synchronous raw input
    requests return `-EOPNOTSUPP`.
+5. Keep decoded input lengths in a native `u16` structure, separately from
+   the packed little-endian wire header. The shared wire format is unchanged.
 
 Regenerate into a new empty directory:
 

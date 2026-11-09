@@ -20,7 +20,7 @@
   "spark_hwmon": {
     "repository": "https://github.com/johannhartmann/spark_hwmon.git",
     "commit": "ef94faace8a44380e8ba8c8bd8cffd185c82af67",
-    "version": "0.3.0.n1x.6",
+    "version": "0.3.0.n1x.7",
     "local_patch": "platform/hwmon/n1x-platform.patch"
   },
   "speaker_firmware": {

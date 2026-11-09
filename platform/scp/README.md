@@ -19,5 +19,7 @@ handlers are at Cortex-M offsets `0x3ff0`, `0x40f8` and `0x41a4`; the probe
 checks the instruction sequence at SRAM offset `0x41ce`.
 
 The debugfs `sram_snapshot` file returns a private copy for each open. Open
-files do not retain device MMIO after removal. This diagnostic interface and
+files do not retain device MMIO after removal. All live mailbox and SRAM reads
+serialize with system sleep. New live reads return `EHOSTDOWN` while suspended;
+already copied snapshots remain readable. This diagnostic interface and
 the firmware-specific matching policy still require upstream subsystem review.

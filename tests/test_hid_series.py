@@ -13,6 +13,10 @@ SPEC.loader.exec_module(hid_series)
 
 
 class HIDSeriesTests(unittest.TestCase):
+    def test_decoded_input_lengths_use_native_byte_order(self):
+        subprocess.run(['python3', str(ROOT / 'platform/sensorhub/test_input_body.py')],
+                       check=True, timeout=40)
+
     def test_reply_race_reproduces_on_prerequisite_and_is_fixed(self):
         with tempfile.TemporaryDirectory() as temporary:
             tree = Path(temporary)

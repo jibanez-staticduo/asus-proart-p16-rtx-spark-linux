@@ -53,6 +53,16 @@ def without_input_quirk(source):
     return source.replace(guard, '', 1)
 
 
+def without_cpu_input_body(source):
+    declaration = ('/* Decoded input body fields are in CPU byte order, not the packed wire ABI. */\n'
+                   'struct spi_hid_input_body {\n\tu8 input_report_type;\n'
+                   '\tu16 content_len;\n\tu8 content_id;\n};\n\n')
+    if source.count(declaration) != 1:
+        raise RuntimeError('Decoded input body changed; review the patch split')
+    return source.replace(declaration, '', 1).replace(
+        'struct spi_hid_input_body', 'struct input_report_body_header')
+
+
 def prepare(output):
     output.mkdir(parents=True, exist_ok=True)
     if any(output.iterdir()):
@@ -93,13 +103,14 @@ def prepare(output):
              'companion. Evaluate _RST using its namespace handle so reset reaches\n'
              'the firmware method checked during probe.')
         core = (ROOT / 'platform/sensorhub/spi-hid-core.c').read_text()
-        (tree / PREFIX / 'spi-hid-core.c').write_text(without_input_quirk(core))
+        wire_body_core = without_cpu_input_body(core)
+        (tree / PREFIX / 'spi-hid-core.c').write_text(without_input_quirk(wire_body_core))
         emit('0003-HID-spi-hid-serialize-and-type-GET-report-responses.patch',
              'HID: spi-hid: serialize and type GET report responses',
              'Select GET_INPUT_REPORT for input reports and accept its response type.\n'
              'Hold output_lock through response validation and copying, preventing\n'
              'another caller from replacing the shared reply after completion.')
-        (tree / PREFIX / 'spi-hid-core.c').write_text(core)
+        (tree / PREFIX / 'spi-hid-core.c').write_text(wire_body_core)
         (tree / PREFIX / 'spi-hid-core.h').write_bytes(
             (ROOT / 'platform/sensorhub/spi-hid-core.h').read_bytes())
         emit('0004-HID-spi-hid-handle-MSFW1111-stream-only-input-reports.patch',
@@ -108,6 +119,13 @@ def prepare(output):
              'and does not answer GET_INPUT_REPORT. Let the pending HID sensor read\n'
              'complete from its DATA report and reject synchronous raw input reads.\n'
              'Match the controller ACPI ID and HID vendor/product, independent of the host.')
+        (tree / PREFIX / 'spi-hid-core.c').write_text(core)
+        emit('0005-HID-spi-hid-keep-decoded-input-lengths-in-CPU-byte-order.patch',
+             'HID: spi-hid: keep decoded input lengths in CPU byte order',
+             'The input-body parser uses get_unaligned_le16(), which returns a CPU-\n'
+             'endian value. Store it in a private decoded structure with u16 fields,\n'
+             'rather than the packed wire structure whose length is __le16. Keep\n'
+             'the shared wire ABI and wire-size calculations unchanged.')
         for name in FILES:
             actual = (tree / PREFIX / name).read_bytes()
             if actual != (ROOT / 'platform/sensorhub' / name).read_bytes():

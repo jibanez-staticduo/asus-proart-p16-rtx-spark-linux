@@ -11,6 +11,32 @@ SRAM and provider/module/runtime-PM leases are retained until reboot. Task
 STOP, CLOSE and IRQ disable do not establish whole-core DMA quiescence.
 Shutdown and reclamation must be verified before default startup is enabled.
 
+## System sleep
+
+Once firmware has been published, system suspend and hibernation are refused
+in the driver's PM `prepare` callback, before the kernel suspends any device.
+Previously, refusal occurred during `suspend`, after other audio devices had
+already suspended; repeated failed sleep attempts could leave the audio graph
+without working endpoints. `prepare` serializes with explicit boot and blocks
+new boot/inspection operations until `complete`, including aborted transitions.
+The runtime-suspend publication guard remains in place.
+
+This fixes late rejection; it does **not** implement DSP suspend/resume. A
+firmware STOP/CLOSE reply does not prove DMA has stopped, so the driver cannot
+safely power down a published DSP. Unpublished instances retain their existing
+runtime/system PM path. Full sleep support requires verified whole-core
+quiescence and a tested restart or state-restoration sequence. See the kernel's
+[PM callback contract](https://docs.kernel.org/driver-api/pm/types.html).
+
+A published instance cannot be replaced live. Install the updated DKMS package
+and reboot before hardware validation; preserve the working boot entry. Firmware
+startup remains opt-in. To qualify this fix, use a disposable session: verify an
+unpublished instance's sleep/resume, then explicitly boot firmware and request
+sleep. The latter must fail in `prepare` with the diagnostic above, with no DSP
+`acpi_subsys_suspend` failure and no audio-card loss. Confirm speaker/microphone
+nodes and playback still work after repeated rejected requests. Build and
+offline tests alone do not establish that hardware result.
+
 ## Secure loading and IPC
 
 The driver requires SROOT client ABI v2 before taking power or publishing
@@ -54,7 +80,8 @@ cd platform/dsp && makepkg
 ```
 
 `Kbuild` supports external/DKMS builds and `CONFIG_N1X_ADSP` integration.
-Actual-function sanitizer harnesses cover boot, IPC, task/PCM transitions,
+Actual-function sanitizer harnesses cover PM preparation and boot serialization,
+IPC, task/PCM transitions,
 producer/period handling, faults and concurrency. Native KUnit protocol tests
 are described in [platform/README.md](../README.md). Do not replace a published
 live module to validate a new package; qualify changed sources after a reboot.

@@ -40,7 +40,7 @@ struct n1x_scp {
 	resource_size_t size;
 	struct dentry *debugfs;
 	void __iomem *mailbox[2];
-	struct mutex query_lock;
+	struct mutex query_lock; /* Serializes mailbox/SRAM access against sleep. */
 	u16 next_token;
 	bool mailbox_poisoned;
 	bool suspended;
@@ -158,6 +158,20 @@ static int n1x_scp_sensors_show(struct seq_file *seq, void *unused)
 }
 DEFINE_SHOW_ATTRIBUTE(n1x_scp_sensors);
 
+static int n1x_scp_lock_live(struct n1x_scp *scp)
+{
+	int ret;
+
+	ret = mutex_lock_interruptible(&scp->query_lock);
+	if (ret)
+		return ret;
+	if (scp->suspended) {
+		mutex_unlock(&scp->query_lock);
+		return -EHOSTDOWN;
+	}
+	return 0;
+}
+
 static int n1x_log_header(struct n1x_scp *scp, u32 *count, u16 *capacity)
 {
 	void __iomem *header = scp->sram + N1X_LOG_OFFSET;
@@ -177,15 +191,20 @@ static int n1x_scp_status_show(struct seq_file *seq, void *unused)
 	struct n1x_scp *scp = seq->private;
 	u32 count;
 	u16 capacity;
-	int ret = n1x_log_header(scp, &count, &capacity);
+	int ret = n1x_scp_lock_live(scp);
 
 	if (ret)
 		return ret;
+	ret = n1x_log_header(scp, &count, &capacity);
+	if (ret)
+		goto unlock;
 	seq_printf(seq, "firmware_log_records=%u\nfirmware_log_capacity=%u\n", count, capacity);
 	seq_puts(seq, "firmware_lifecycle=platform-owned\n");
 	seq_printf(seq, "mailbox_queries=%s\n", !enable_mailbox ? "disabled" :
 		   READ_ONCE(scp->mailbox_poisoned) ? "failed" : "enabled");
-	return 0;
+unlock:
+	mutex_unlock(&scp->query_lock);
+	return ret;
 }
 DEFINE_SHOW_ATTRIBUTE(n1x_scp_status);
 
@@ -195,10 +214,13 @@ static int n1x_scp_log_show(struct seq_file *seq, void *unused)
 	char record[N1X_LOG_RECORD_SIZE];
 	u32 count, index, begin;
 	u16 capacity;
-	int ret = n1x_log_header(scp, &count, &capacity);
+	int ret = n1x_scp_lock_live(scp);
 
 	if (ret)
 		return ret;
+	ret = n1x_log_header(scp, &count, &capacity);
+	if (ret)
+		goto unlock;
 	begin = count > capacity ? count - capacity : 0;
 	for (index = begin; index < count; index++) {
 		void __iomem *entry = scp->sram + N1X_LOG_OFFSET + N1X_LOG_HEADER_SIZE +
@@ -210,7 +232,9 @@ static int n1x_scp_log_show(struct seq_file *seq, void *unused)
 	/* Firmware can append while reading: this is a bounded snapshot, not a
 	 * promise of a transactionally consistent log or a destructive log drain.
 	 */
-	return 0;
+unlock:
+	mutex_unlock(&scp->query_lock);
+	return ret;
 }
 DEFINE_SHOW_ATTRIBUTE(n1x_scp_log);
 
@@ -226,13 +250,20 @@ static int n1x_scp_snapshot_open(struct inode *inode, struct file *file)
 {
 	struct n1x_scp *scp = inode->i_private;
 	struct n1x_scp_snapshot *snapshot;
+	int ret;
 
 	snapshot = kvmalloc(struct_size(snapshot, data, scp->size), GFP_KERNEL);
 
 	if (!snapshot)
 		return -ENOMEM;
+	ret = n1x_scp_lock_live(scp);
+	if (ret) {
+		kvfree(snapshot);
+		return ret;
+	}
 	snapshot->bytes = scp->size;
 	memcpy_fromio(snapshot->data, scp->sram, snapshot->bytes);
+	mutex_unlock(&scp->query_lock);
 	file->private_data = snapshot;
 	return 0;
 }
@@ -368,4 +399,4 @@ static struct platform_driver n1x_scp_driver = {
 module_platform_driver(n1x_scp_driver);
 MODULE_DESCRIPTION("N1X SCP firmware queries and log reader");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.2.0");
+MODULE_VERSION("0.2.1");

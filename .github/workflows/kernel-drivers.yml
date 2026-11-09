@@ -1,0 +1,17 @@
+name: Kernel driver offline tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  protocol-and-lifetime:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test actual driver functions with sanitizers and injected faults
+        run: bash scripts/check-kernel-drivers.sh

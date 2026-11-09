@@ -41,15 +41,15 @@ static inline __u32 n1x_adsp_ipc_get32(const __u8 *p)
 
 static inline void n1x_adsp_ipc_put16(__u8 *p, __u16 value)
 {
-	p[0] = value;
+	p[0] = value & 0xff;
 	p[1] = value >> 8;
 }
 
 static inline void n1x_adsp_ipc_put32(__u8 *p, __u32 value)
 {
-	p[0] = value;
-	p[1] = value >> 8;
-	p[2] = value >> 16;
+	p[0] = value & 0xff;
+	p[1] = (value >> 8) & 0xff;
+	p[2] = (value >> 16) & 0xff;
 	p[3] = value >> 24;
 }
 

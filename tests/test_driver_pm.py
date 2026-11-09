@@ -1,0 +1,32 @@
+"""Run actual PM regressions and verify reproducible DKMS source packages."""
+import hashlib
+from pathlib import Path
+import subprocess
+import unittest
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class DriverPMTests(unittest.TestCase):
+    def test_dsp_prepare_boot_and_inspection_serialization(self):
+        subprocess.run(['python3', str(ROOT / 'platform/dsp/test_pm.py')],
+                       check=True, timeout=40)
+
+    def test_scp_reads_are_serialized_with_sleep(self):
+        subprocess.run(['python3', str(ROOT / 'platform/scp/test_pm.py')],
+                       check=True, timeout=40)
+
+    def test_dkms_recipes_pin_the_current_source_bytes(self):
+        for name in ('als', 'dsp', 'pluton', 'scp', 'sensorhub'):
+            with self.subTest(driver=name):
+                directory = ROOT / 'platform' / name
+                records = subprocess.check_output(['bash', '-c',
+                    'source PKGBUILD; '
+                    '[[ ${#source[@]} == ${#sha256sums[@]} ]] || exit 1; '
+                    'for ((i=0;i<${#source[@]};i++)); do '
+                    'printf "%s\\t%s\\n" "${source[i]}" "${sha256sums[i]}"; done'],
+                    cwd=directory, text=True)
+                for record in records.splitlines():
+                    filename, expected = record.split('\t')
+                    self.assertEqual(hashlib.sha256((directory / filename).read_bytes()).hexdigest(),
+                                     expected, f'{name}/{filename}')

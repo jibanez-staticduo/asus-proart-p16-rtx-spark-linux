@@ -72,5 +72,11 @@
   "hardware_target_kernel_booted": false,
   "submitted": false,
   "human_dco_signoff": false,
-  "previous_review_head": "dac879fb60524fa8fdfd8d824e7260762ed27353"
+  "previous_review_head": "dac879fb60524fa8fdfd8d824e7260762ed27353",
+  "follow_up": {
+    "patch": "0005-HID-spi-hid-keep-decoded-input-lengths-in-CPU-byte-order.patch",
+    "sha256": "305579e12433e79acdf7b05c50f093c9695b2035e4d96dc09f1b2224205f15f2",
+    "scope": "Decoded CPU-endian input-body representation; shared wire ABI unchanged",
+    "validation": "Applies to review_head; current packaged transport builds with W=1 and Sparse. Original four-commit full-kernel build report does not cover this follow-up."
+  }
 }

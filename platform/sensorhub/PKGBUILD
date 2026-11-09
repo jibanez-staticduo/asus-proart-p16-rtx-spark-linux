@@ -1,24 +1,33 @@
 pkgname=n1x-sensorhub-dkms
-pkgver=0.1.0
-pkgrel=3
+pkgver=0.1.1
+pkgrel=1
 pkgdesc='SPI HID ACPI reset and sensor-controller report handling fixes'
 arch=('aarch64')
 url='https://github.com/johannhartmann/asus-proart-p16-rtx-spark-linux'
 license=('GPL-2.0-only')
 depends=('dkms')
-source=('spi-hid-acpi.c' 'spi-hid-core.c' 'spi-hid.h' 'spi-hid-core.h' 'spi-hid-trace.h' 'Kbuild' 'dkms.conf' 'provenance.json')
+checkdepends=('python' 'gcc')
+source=('spi-hid-acpi.c' 'spi-hid-core.c' 'spi-hid.h' 'spi-hid-core.h' 'spi-hid-trace.h' 'Kbuild' 'dkms.conf' 'provenance.json' 'test_requests.py' 'test_input_body.py')
 sha256sums=('6a0e9c671885d79751581d4ceb9b4ad2b1c60941a74ded1598d6350e7f6e479f'
-            'ead9464951f016794606f29fda61b683d8bd7a58de32981dc6faf7a16562cf1e'
+            '2a8c5525ba34f74635ac8f0c9778ec5d0841399dd5df2697243c248b47723036'
             '2af9a1c759b9e782fde41718ce707f6963a27a72141e2a1d70dce6b76c850854'
             'f46c83c9f1a71dec3c207dda1c4f8ebb71daf08b7e0daa8cc786e9bee5bfa9a4'
             '38a9db45b7d5a05842731c0c6e2304d72f2cbe42ad78cb9b3ce0c9cfedb6c3fc'
             '2e966c2de360f1f8dba1893d0d8271558556e501ef30799a486a64313ae213e3'
-            'effb5f12354b012d34894275692f8062951e1ea5b7f5c69796b847275ec2b17e'
-            'dfb66c68b3ecfc24300dd95d5cf799f78d00cdb19c12e6a6353aa3193c435603')
+            '150f5436509f22425760814e5e5236a8e83131a5a34e15af17a4e26472b3c968'
+            '411372409c2ebf8d9af5e76d3fbab4ae636c8c64fe51d276fdde949a6b9d9b5e'
+            '0847e4ce0e16be8f5fe10bf8552087f2e4649840fede77b29b8910ff95e09ef2'
+            'c897a8db9848e3b39d076cc9c0d4f4a5c5c326c10ad9e69794566ebfc7402efa')
+
+check() {
+  cd "$srcdir"
+  python test_requests.py
+  python test_input_body.py
+}
 
 package() {
   local file
-  for file in "${source[@]}"; do
+  for file in spi-hid-acpi.c spi-hid-core.c spi-hid.h spi-hid-core.h spi-hid-trace.h Kbuild dkms.conf provenance.json; do
     install -Dm644 "$srcdir/$file" "$pkgdir/usr/src/n1x-sensorhub-$pkgver/$file"
   done
 }

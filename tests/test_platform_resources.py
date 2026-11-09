@@ -214,7 +214,9 @@ typedef uint8_t u8;
 #define GFP_KERNEL 0
 #define struct_size(p,m,n) (sizeof(*(p))+(n))
 struct inode {void *i_private;};struct file {void *private_data;};
-struct n1x_scp {void *sram;size_t size;};
+struct n1x_scp {void *sram;size_t size;int query_lock;};
+static int n1x_scp_lock_live(struct n1x_scp *scp) {assert(!scp->query_lock);scp->query_lock=1;return 0;}
+static void mutex_unlock(int *lock) {assert(*lock);*lock=0;}
 static bool fail;static size_t copied;
 static void *kvmalloc(size_t bytes,int flags) {assert(flags==GFP_KERNEL);return fail?NULL:malloc(bytes);}
 #define kvfree(p) free(p)
@@ -225,7 +227,7 @@ static ssize_t simple_read_from_buffer(char *to,size_t count,loff_t *pos,const v
 int main(void)
 {
  for(unsigned size=4096;size<=1048576;size*=4){
-  struct n1x_scp scp={malloc(size),size};assert(scp.sram);memset(scp.sram,0x5a,size);
+  struct n1x_scp scp={.sram=malloc(size),.size=size};assert(scp.sram);memset(scp.sram,0x5a,size);
   struct inode inode={&scp};struct file file={0};fail=true;
   assert(n1x_scp_snapshot_open(&inode,&file)==-ENOMEM && !file.private_data);fail=false;
   assert(!n1x_scp_snapshot_open(&inode,&file) && copied==size);

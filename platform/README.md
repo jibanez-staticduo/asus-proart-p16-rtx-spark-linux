@@ -59,3 +59,26 @@ Install QEMU's ARM64 system emulator to execute that configuration. The suite
 checks DSP IPC, PCM descriptors, PCBI replies and signed firmware envelopes.
 It complements the actual-function fault/concurrency harnesses in this
 repository; it does not boot platform firmware or qualify hardware.
+
+The aggregate `drivers/platform/n1x` placement above is a local build/test
+integration, not a proposed upstream subsystem layout. See
+[kernel driver architecture](../docs/kernel-driver-architecture.md) for
+subsystem ownership, ABI contracts, validation and remaining blockers.
+
+Run the offline regression suite without kernel headers:
+
+```sh
+bash scripts/check-kernel-drivers.sh
+```
+
+To also build all maintained modules and test the separate hwmon/NPU sources:
+
+```sh
+bash scripts/check-kernel-drivers.sh --build \
+  /usr/lib/modules/$(uname -r)/build \
+  "$PWD/build/spark_hwmon" "$PWD/../n1x-lab/npu"
+```
+
+This command does not install or load modules. `W=1` builds and host-side
+ASan/UBSan tests supplement hardware qualification; they do not establish
+working suspend, recovery, reload or support on a different board.

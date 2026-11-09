@@ -5,6 +5,13 @@ These four local commits were built on HID `for-next` commit
 They have not been submitted. The maintainer has not selected or accepted
 this prerequisite stack.
 
+A separate fifth follow-up, `0005-HID-spi-hid-keep-decoded-input-lengths-in-CPU-byte-order.patch`,
+keeps already decoded lengths in a native structure. It applies to the four-commit
+review head; `target-base.json` records its checksum and separate validation.
+The original full-kernel and per-commit build report below covers the first four
+commits. The follow-up has packaged-transport module/Sparse and decoder tests;
+full target-kernel and hardware qualification remain pending.
+
 `target-base.json` records the commits, source pins and patch hashes.
 `0000-cover-letter.patch` records testing, limitations and tool assistance.
 `recipients.json` is the output of the target tree's `get_maintainer.pl`;
@@ -25,6 +32,7 @@ git am --include='drivers/hid/spi-hid/*' \
   --include=Documentation/devicetree/bindings/input/hid-over-spi.yaml \
   "$P16_SRC/kernel/2152-arm64-qcom-add-Surface-Pro-11-platform-support.patch"
 git am "$P16_SRC"/upstream/spi-hid/hid-for-next-20261106/000[1-4]-*.patch
+git apply "$P16_SRC"/upstream/spi-hid/hid-for-next-20261106/0005-*.patch
 ```
 
 The two filtered imports of patch 2152 supply coherent RX support in the

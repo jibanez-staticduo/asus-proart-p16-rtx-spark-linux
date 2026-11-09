@@ -1,18 +1,25 @@
 pkgname=n1x-scp-dkms
-pkgver=0.2.0
-pkgrel=5
+pkgver=0.2.1
+pkgrel=1
 pkgdesc='NVIDIA N1X SCP firmware queries and log reader'
 arch=('aarch64')
 url='https://github.com/johannhartmann/asus-proart-p16-rtx-spark-linux'
 license=('GPL-2.0-only')
 depends=('dkms')
-source=('n1x_scp.c' 'Kbuild' 'dkms.conf' 'n1x-scp.conf' 'n1x-scp.modules' 'README.md')
-sha256sums=('7545baad5b4ab2019f50096aa7b4a0aed2fe9cc5677c0ff85246a2856f78fd4e'
+checkdepends=('python' 'gcc')
+source=('n1x_scp.c' 'Kbuild' 'dkms.conf' 'n1x-scp.conf' 'n1x-scp.modules' 'README.md' 'test_pm.py')
+sha256sums=('693f814464d319139485d7e2fcb9ee31c67d03c097de2809ddb246e26d74b05c'
             '75711680eb0bdbacb3ac5127df4fed12e7e45e2bd4e5a5b6829295642a161cf3'
-            '027cf3cbec3b8d707a36e067935015e427ae8e292472a02cb18eed51d2293dea'
+            'af3029d2867e7deea8f0998f9ad2b6b41998c6b8e5604fdf18dd91be1a226aee'
             '839e04fa00c81253a6d4093dcb2af4ad17ef85b21b884081fb6d236d8e878671'
             '22a3ae59d7a55fed69b6a04ee7c8eca5aa9ffbcae225bf49f476b980ec388d43'
-            '2f1fa63bd229e8db9f8cacdf5b63d0dfefbc09328c3a9aea00b04eaab3d23427')
+            '90a092a5fef4f87d98e727ea7ce9e8607d84f67ca87cedc488d642aa4f4f8795'
+            '5a28ae8a9c3a844f57858bf4fea8381071a0daf901a4ad6c91dc53a6e9ccff84')
+
+check() {
+  cd "$srcdir"
+  python test_pm.py
+}
 
 package() {
   local file

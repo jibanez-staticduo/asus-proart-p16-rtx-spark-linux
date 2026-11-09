@@ -119,6 +119,7 @@ struct n1x_adsp {
 	u16 last_command;
 	int error, irq;
 	bool attempted, published, boot_ready;
+	bool sleep_prepared; /* Protected by lock, like firmware publication. */
 };
 
 static int n1x_adsp_group_member(struct device *member, void *data)
@@ -395,6 +396,8 @@ static int n1x_adsp_boot(struct n1x_adsp *dsp)
 
 	if (!enable_boot || !capable(CAP_SYS_RAWIO))
 		return -EPERM;
+	if (dsp->sleep_prepared)
+		return -EBUSY;
 	if (dsp->attempted)
 		return -EALREADY;
 	/* HiFi5-1 shares its control block with HiFi5-0 and requires the
@@ -685,7 +688,7 @@ static ssize_t inspect_show(struct device *dev, struct device_attribute *attribu
 	if (!capable(CAP_SYS_RAWIO))
 		return -EPERM;
 	mutex_lock(&dsp->lock);
-	if (dsp->published) {
+	if (dsp->published || dsp->sleep_prepared) {
 		bytes = -EBUSY;
 		goto unlock;
 	}
@@ -823,7 +826,42 @@ static int n1x_adsp_runtime_resume(struct device *dev)
 	return mtk_pwrap_dev_resume(dsp->pwrap, 0);
 }
 
+static int n1x_adsp_prepare(struct device *dev)
+{
+	struct n1x_adsp *dsp = dev_get_drvdata(dev);
+	int err = 0;
+
+	/* Reject before any device is suspended. Runtime suspend's publication
+	 * guard is too late for system sleep: abort/resume can disrupt unrelated
+	 * ALSA devices. A started DSP still lacks a verified DMA-quiesce path.
+	 * Serialize with boot_store/inspect_show, including publication in flight.
+	 */
+	mutex_lock(&dsp->lock);
+	if (dsp->published) {
+		dev_warn_ratelimited(dev,
+				     "system sleep blocked: DSP firmware active; "
+				     "shutdown unverified\n");
+		err = -EBUSY;
+	} else {
+		dsp->sleep_prepared = true;
+	}
+	mutex_unlock(&dsp->lock);
+	return err;
+}
+
+static void n1x_adsp_complete(struct device *dev)
+{
+	struct n1x_adsp *dsp = dev_get_drvdata(dev);
+
+	/* Also called when another device aborts the power transition. */
+	mutex_lock(&dsp->lock);
+	dsp->sleep_prepared = false;
+	mutex_unlock(&dsp->lock);
+}
+
 static const struct dev_pm_ops n1x_adsp_pm = {
+	.prepare = pm_sleep_ptr(n1x_adsp_prepare),
+	.complete = pm_sleep_ptr(n1x_adsp_complete),
 	SYSTEM_SLEEP_PM_OPS(pm_runtime_force_suspend, pm_runtime_force_resume)
 	RUNTIME_PM_OPS(n1x_adsp_runtime_suspend, n1x_adsp_runtime_resume, NULL)
 };
@@ -1786,4 +1824,7 @@ EXPORT_SYMBOL_GPL(n1x_adsp_primary_abi);
 module_platform_driver(n1x_adsp_driver);
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("MT8901 DSP boot, IPC and playback services");
-MODULE_VERSION("0.1.14");
+MODULE_VERSION("0.1.16");
+MODULE_FIRMWARE("nvidia/n1x/hifi5-0-mt8901-signed.bin");
+MODULE_FIRMWARE("nvidia/n1x/hifi5-1-mt8901-signed.bin");
+MODULE_FIRMWARE("nvidia/n1x/hifi1-0-mt8901-signed.bin");

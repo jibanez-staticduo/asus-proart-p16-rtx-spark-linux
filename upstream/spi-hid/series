@@ -2,3 +2,4 @@
 0002-HID-spi-hid-evaluate-reset-on-the-ACPI-handle.patch
 0003-HID-spi-hid-serialize-and-type-GET-report-responses.patch
 0004-HID-spi-hid-handle-MSFW1111-stream-only-input-reports.patch
+0005-HID-spi-hid-keep-decoded-input-lengths-in-CPU-byte-order.patch

@@ -237,6 +237,9 @@ static void period_callback(void *data,const struct n1x_adsp_pcm_position *posit
  period_calls++;period_error=error;
 }
 int main(void) {
+ reset();dsp.sleep_prepared=true;
+ assert(n1x_adsp_boot(&dsp)==-EBUSY);
+ assert(!reads && !writes && !pm_refs && !module_refs && !symbol_refs && !dsp.attempted);
  for(int f=1;f<=17;f++) {
   reset();fault=f;
   if(f==7)mailbox_memory[ADSP_OUT_STATUS/4]=1;
