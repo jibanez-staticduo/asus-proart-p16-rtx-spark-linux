@@ -1,0 +1,60 @@
+--- a/platform/pluton/n1x_pluton.c
++++ b/platform/pluton/n1x_pluton.c
+@@ -390,6 +390,8 @@
+ 	unsigned long deadline;
+ 	int ret;
+ 
++	if (command == N1X_PLUTON_CHANNELS)
++		return -ENOTTY;
+ 	if (command == N1X_PLUTON_QUERY)
+ 		return n1x_pluton_query_ioctl(p, user);
+ 	if (command != N1X_PLUTON_INFO && command != N1X_PLUTON_CHANNELS)
+@@ -541,7 +543,7 @@
+ 	{ "NVDA8601" },
+ 	{ }
+ };
+-MODULE_DEVICE_TABLE(acpi, n1x_pluton_ids);
++/* Explicit service loading only: no ACPI modalias autoload. */
+ 
+ static struct platform_driver n1x_pluton_driver = {
+ 	.probe = n1x_pluton_probe,
+--- a/platform/pluton/Kbuild
++++ b/platform/pluton/Kbuild
+@@ -1,5 +1 @@
+-# SPDX-License-Identifier: GPL-2.0-only
+-ifeq ($(KBUILD_EXTMOD),$(abspath $(src)))
+-CONFIG_N1X_PLUTON ?= m
+-endif
+-obj-$(CONFIG_N1X_PLUTON) += n1x_pluton.o
++obj-m += n1x_pluton.o
+--- a/platform/pluton/pluton-info.py
++++ b/platform/pluton/pluton-info.py
+@@ -98,8 +98,6 @@
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument("--device", default="/dev/n1x-pluton")
+-    parser.add_argument("--discover", action="store_true",
+-                        help="perform PFI control-channel transactions; requires enable_transport=1")
+     parser.add_argument('--services', action='store_true',
+                         help='execute PCBI query-service command 5 to list service IDs and versions')
+     parser.add_argument('--versions', action='store_true',
+@@ -117,18 +115,9 @@
+             result.update(zip(keys, values))
+             if result["abi_version"] != 1:
+                 raise ValueError("unsupported driver ABI")
+-            if args.discover or args.services or args.versions or args.device_info:
++            if args.services or args.versions or args.device_info:
+                 if not result['transport_enabled'] or result['poisoned']:
+                     raise ValueError('PFI transport is disabled or in an uncertain state')
+-            if args.discover:
+-                buf = read_ioctl(fd, 1, 40)
+-                count, reserved = struct.unpack_from("<II", buf)
+-                if count > 16 or reserved:
+-                    raise ValueError("invalid channel response")
+-                result["channels"] = [{"id": buf[8 + i * 2], "flags": buf[9 + i * 2],
+-                                       "write_ready": bool(buf[9 + i * 2] & 1),
+-                                       "read_ready": bool(buf[9 + i * 2] & 2)}
+-                                      for i in range(count)]
+             if args.versions:
+                 result['pcbi_versions'] = query_ioctl(fd, PCBI_ENUMERATE_VERSIONS)
+             if args.services:

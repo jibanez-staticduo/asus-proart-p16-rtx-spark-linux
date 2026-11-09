@@ -18,6 +18,9 @@ Use your distribution's kernel/module packaging and boot procedure.
 | Light sensor | Virtual GPIO/IRQ handling and ACPI reset fix that brings up SPI-HID and IIO illuminance |
 | [Audio](improvements/audio/README.md) | Board-specific speaker routing and public audio support instructions |
 | [Telemetry](improvements/telemetry/README.md) | Linux 7.3 driver binding, BIOS-independent exact-model admission and validated MMIO sensor fallback |
+| [Optional NPU](improvements/npu/README.md) | Source fixes, opt-in provider and local compiler/firmware preparation |
+| [Manual diagnostics](improvements/diagnostics/README.md) | Optional SCP logs/descriptors and Pluton typed metadata |
+| [Audit and policy](improvements/tools/README.md) | Read-only kernel/UKI checks, USB4 stdout proposal and optional critical-battery policy |
 | [Validation](improvements/VALIDATION.md) | What was physically tested, measured results and remaining limitations |
 
 The physical target is H7607BA BIOS 303. Other BIOS releases are not excluded by

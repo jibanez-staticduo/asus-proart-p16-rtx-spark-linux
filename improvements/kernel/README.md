@@ -148,3 +148,25 @@ exact model/BIOS, `lscpu`, the boot log containing the coordinated-admission
 message, and results from a manually controlled suspend/resume test. Review
 logs for personal identifiers before sharing. A prepared firmware-table capture
 with its ACPI/LPI and CPU topology would permit a direct structural comparison.
+
+## USB wake, SPI transactions and optional NPU prerequisites (2026-11-10)
+
+9106 tolerates unsupported GPIO debounce without discarding an otherwise usable
+IRQ. 9107 adds the ACPI GPIO wake path for xHCI, retaining NVIDIA/jlobue source
+attribution. Together with the earlier virtual GPIO support, the local candidate
+woke by USB mouse after 33.9568 s (IRQ226); this is one peripheral trial, not
+USB4 dock qualification. Source tests exercise actual debounce and wake helpers.
+
+9110 scopes the missing-_CCA noncoherent DMA correction to SROOT NVDA8600
+revision1; explicit coherency and unrelated devices retain their policy. The
+optional NPU provider requires it. 9111 retains GET response ownership through
+validation and copy, 9112 recognizes MSFW1111 stream-only input, and 9113 keeps
+decoded input lengths in CPU byte order. Johann Hartmann's SPI authorship is
+retained. 9111/9112 are adapted to the curated prerequisites, not byte-identical
+to the full distro export. Actual request concurrency, bounds, length and
+stream-only tests run in check.sh. Fragmented reports/other SPI hardware remain
+outside this qualification. ALS per-channel scaling is already in the base.
+
+See [optional NPU](../npu/README.md), [manual diagnostics](../diagnostics/README.md)
+and [read-only audit/USB4 proposal](../tools/README.md). The latter does not add
+a missing USB4 driver or install a boot policy. No RTC change is included.

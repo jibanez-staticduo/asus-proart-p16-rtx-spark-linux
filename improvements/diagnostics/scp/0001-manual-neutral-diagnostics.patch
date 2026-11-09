@@ -1,0 +1,20 @@
+--- a/platform/scp/n1x_scp.c
++++ b/platform/scp/n1x_scp.c
+@@ -355,7 +355,7 @@
+ 	{ "NVDA8200" },
+ 	{ }
+ };
+-MODULE_DEVICE_TABLE(acpi, n1x_scp_ids);
++/* Explicit service loading only: no ACPI modalias autoload. */
+ 
+ static struct platform_driver n1x_scp_driver = {
+ 	.probe = n1x_scp_probe,
+--- a/platform/scp/Kbuild
++++ b/platform/scp/Kbuild
+@@ -1,5 +1 @@
+-# SPDX-License-Identifier: GPL-2.0-only
+-ifeq ($(KBUILD_EXTMOD),$(abspath $(src)))
+-CONFIG_N1X_SCP ?= m
+-endif
+-obj-$(CONFIG_N1X_SCP) += n1x_scp.o
++obj-m += n1x_scp.o

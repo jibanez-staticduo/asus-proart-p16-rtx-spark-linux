@@ -22,3 +22,11 @@ under the notices and license information present in those revisions.
 - Audio component provenance and license information is recorded in
   `improvements/audio/README.md`. No OEM-derived audio tuning or firmware
   binaries are added by this fork.
+- `improvements/npu/provider/*.patch` and its source-function harnesses retain
+  the upstream GPL-2.0-only kernel terms; the runtime/local-input tools follow
+  upstream MIT notices and NOTICE/LICENSING.md at the pinned source revision.
+- `improvements/diagnostics/` adapts GPL-2.0-only Johann Hartmann drivers/tests;
+  the referenced upstream UAPI retains its Linux-syscall-note exception.
+- `improvements/tools/` and `improvements/policy/` are MIT; included license
+  texts and upstream configuration attribution apply. None grants rights to
+  external OEM firmware/compiler binaries, which are not included.

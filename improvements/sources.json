@@ -3,8 +3,8 @@
   "reference_upstream": {
     "repository": "https://github.com/johannhartmann/asus-proart-p16-rtx-spark-linux",
     "commit": "93e0d2286888a69f31eca8f5b243005c9b293535",
-    "latest_integration_commit": "21caf8212b4bee8f8a339fc6588e320667f7505b",
-    "latest_integration_note": "The contribution branch merges the current upstream repository; the portable main branch keeps only this hardware-patch guide."
+    "latest_integration_commit": "7cef6c476a09c882c7ddd61855e222ee9ee5dc88",
+    "latest_integration_note": "Our PR2 is merged upstream. This portable main intentionally does not merge upstream installers/platform policy; optional source references are independently pinned below."
   },
   "kernel": {
     "release": "7.3",
@@ -26,7 +26,7 @@
       ],
       "adaptation": "Consolidated Linux7.3 port, P16 automatic firmware admission and suspend-only policy; not a new upstream sign-off"
     },
-    "patch_count": 84,
+    "patch_count": 90,
     "adaptation_note": "The exported subset omits unrelated scheduler, x86 and Qualcomm changes from the reference distro. The coordinated follow-up tentatively admits 18 or 20 present CPUs while retaining the existing complete-coverage and firmware hierarchy contracts; only the 20-CPU P16 is physically validated. Use olddefconfig; no full rebuild of this compact subset is claimed.",
     "followups": [
       {
@@ -51,8 +51,51 @@
         "change": "Actual admission regression covers 18/20-CPU acceptance with the existing hierarchy and 16/19 rejection; structural and transient-error checks remain required",
         "sha256": "05d79541ee7964f979ca1b58e28de35e6b10b29b60b57957fc066c5ba9b99941",
         "sku_reference": "https://www.nvidia.com/en-us/products/rtx-spark/specifications/"
+      },
+      {
+        "file": "kernel/9106-pinctrl-unsupported-debounce.patch",
+        "reference_commit": "c30f83ab090fdfcd3fb159b3e93ede96727198d1",
+        "reference_sha256": "d4d6b9baeaedb861b0354d8c75889f6e88b7c603c5677d72e1ddca616403a662",
+        "sha256": "d4d6b9baeaedb861b0354d8c75889f6e88b7c603c5677d72e1ddca616403a662",
+        "adaptation": "Unmodified source export; original author notices retained"
+      },
+      {
+        "file": "kernel/9107-xhci-acpi-gpio-wake.patch",
+        "reference_commit": "c30f83ab090fdfcd3fb159b3e93ede96727198d1",
+        "reference_sha256": "7960256db7f516ab4fc3f21bc544d91f9f76062049980fab1ef7323db6ff345f",
+        "sha256": "7960256db7f516ab4fc3f21bc544d91f9f76062049980fab1ef7323db6ff345f",
+        "adaptation": "Unmodified source export; original author notices retained"
+      },
+      {
+        "file": "kernel/9110-n1x-sroot-noncoherent-dma.patch",
+        "reference_commit": "c30f83ab090fdfcd3fb159b3e93ede96727198d1",
+        "reference_sha256": "e49c9020f1ad4e3d075410aca5addeee73caf507e210056f72f24c6cc7d46a17",
+        "sha256": "e49c9020f1ad4e3d075410aca5addeee73caf507e210056f72f24c6cc7d46a17",
+        "adaptation": "Unmodified source export; original author notices retained"
+      },
+      {
+        "file": "kernel/9111-spi-hid-serialize-get.patch",
+        "reference_commit": "c30f83ab090fdfcd3fb159b3e93ede96727198d1",
+        "reference_sha256": "a3c6e9919bb118165466446071a67c5e01c5b150cc0bf333a99fbbeeaf51ad22",
+        "sha256": "f44d92b6c4653ad017310ab5f717de71bfdc3154f10752e888a0baaed04d976c",
+        "adaptation": "Curated prerequisite raw_request and include context; source harnesses and zero-fuzz replay required"
+      },
+      {
+        "file": "kernel/9112-spi-hid-stream-only.patch",
+        "reference_commit": "c30f83ab090fdfcd3fb159b3e93ede96727198d1",
+        "reference_sha256": "5b6469af99fa22b61413b2e863fcb27fa8a34b1ffc6b7d9c017e8badda9c5723",
+        "sha256": "778d8614bca27f98d20671f7ac53c39119d3f59a5ba5909e8798360ed91e09d9",
+        "adaptation": "Curated prerequisite raw_request and include context; source harnesses and zero-fuzz replay required"
+      },
+      {
+        "file": "kernel/9113-spi-hid-native-input-length.patch",
+        "reference_commit": "c30f83ab090fdfcd3fb159b3e93ede96727198d1",
+        "reference_sha256": "305579e12433e79acdf7b05c50f093c9695b2035e4d96dc09f1b2224205f15f2",
+        "sha256": "305579e12433e79acdf7b05c50f093c9695b2035e4d96dc09f1b2224205f15f2",
+        "adaptation": "Unmodified source export; original author notices retained"
       }
-    ]
+    ],
+    "usb_wake_reference_commit": "1427631a88c47c14bd082e4141ec6ec1e30a3ce2"
   },
   "telemetry": {
     "repository": "https://github.com/johannhartmann/spark_hwmon",
@@ -73,5 +116,36 @@
     "patch": "audio/route-h7607ba.patch",
     "adaptation": "Four CS42L43 Speaker DAPM routes guarded by exact ASUS/H7607BA DMI and NVDA6210 ACPI presence",
     "oem_tuning_redistributed": false
+  },
+  "optional_platform": {
+    "provider_repository": "https://github.com/johannhartmann/n1x-npu-linux",
+    "provider_commit": "92e9434a65d2b9d3bb0517efb9efc371e9c6b42c",
+    "diagnostic_repository": "https://github.com/johannhartmann/asus-proart-p16-rtx-spark-linux",
+    "diagnostic_commit": "5f3fbe50cd37ffe9ab2c697cb60c37bc01314a99",
+    "distribution_examples_repository": "https://github.com/jibanez-staticduo/omarchy-pkgs",
+    "distribution_example_commits": {
+      "c30f83ab": "c30f83ab090fdfcd3fb159b3e93ede96727198d1",
+      "1427631a": "1427631a88c47c14bd082e4141ec6ec1e30a3ce2",
+      "dac46ed3": "dac46ed377370b48e344cca08f6710bb2b6d3a34",
+      "758ddbdf": "758ddbdf679c5ea2597b700a2a5fb201ff2cebbc",
+      "755a9644": "755a9644b84949234363116c7a8d21bea2d806c1",
+      "fc9c4c7a": "fc9c4c7a4daaccee290a466bb1dd231056b2ed55",
+      "f98d8588": "f98d8588753abc7ab75925bc80c40a4a7f95ebf9",
+      "e73919a2": "e73919a2be675b8bc6c7a9d073604a95c25d489e",
+      "e88b4a3b": "e88b4a3bec4e1938c828f1a01f8710bc6369f7cc"
+    },
+    "oem_binaries_included": false,
+    "autostart": false,
+    "physical_validation": "Original local provider+mmap correction, BIOS303/20 CPUs, three numerical jobs+cleanup before/after78.482s s2idle; public neutral adaptations require independent qualification",
+    "distribution_pull_requests": {
+      "kernel": "https://github.com/omacom/omarchy-pkgs/pull/1958",
+      "scp": "https://github.com/omacom/omarchy-pkgs/pull/2392",
+      "pluton": "https://github.com/omacom/omarchy-pkgs/pull/2393",
+      "critical_battery": "https://github.com/omacom/omarchy-pkgs/pull/2394",
+      "npu_provider": "https://github.com/omacom/omarchy-pkgs/pull/2395",
+      "local_firmware_tools": "https://github.com/omacom/omarchy-pkgs/pull/2396",
+      "runtime": "https://github.com/omacom/omarchy-pkgs/pull/2397",
+      "platform_audit": "https://github.com/omacom/omarchy-pkgs/pull/2398"
+    }
   }
 }

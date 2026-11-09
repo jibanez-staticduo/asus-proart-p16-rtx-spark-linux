@@ -75,3 +75,41 @@ early wake involving a USB mouse receiver. Stock behavior cannot be compared
 for timed wake because it woke immediately. Timed RTC wake is not validated
 by this export; USB receivers and other wake sources may affect sleep. These
 observations do not establish a firmware root cause or a new fix.
+
+## Integrated platform qualification (2026-11-09)
+
+On the same BIOS303/20-CPU H7607BA, the local Linux 7.3 candidate revision41.8
+booted with matching NVIDIA modules. Three changing-input NPU ReLU jobs matched
+independent numerical references and session close released retained allocations,
+both before and after a manually controlled 78.482-second s2idle cycle. Checked
+NPU hardware-off/shutdown completed without error and resume startup succeeded;
+suspend statistics recorded one success and no failures. SCP version/descriptors
+and Pluton typed 4/5/7 queries also succeeded before/after sleep. A separate USB
+mouse wake trial lasted 33.9568 seconds and identified IRQ226. These are bounded
+single-machine results, not power/residency measurements or broad firmware QA.
+
+The public provider gates, runtime packaging paths and manual diagnostic
+adaptations are separately source-tested. They have not been booted/loaded in
+that exact public combination: the hardware result belongs to the original
+local 41.8 source plus mmap correction. Later main 41.9 was installed but not yet
+booted at the last recorded check. No new 41.9 hardware claim is made. 18-CPU
+admission remains provisional; no 18-CPU boot/sleep result is available.
+
+The manual UKI audit passed against the 41.8 image (kernel identity, matching SPI
+payloads, signature metadata and no early NPU/DSP). It checks presence rather
+than Secure Boot trust. The critical-battery daemon reported PowerOff after
+applying the optional policy; battery-depletion shutdown was not exercised.
+USB4 docks remain physically unverified. DSP/AFE activation and shutdown,
+firmware redistribution, automatic boot-policy changes and RTC fixes remain
+outside this export. Public audio remains neutral, without OEM-derived tuning.
+
+## Portable export verification (2026-11-10)
+
+The expanded 90-patch kernel series is replayed against pristine Linux 7.3 with
+`--fuzz=0`, including the USB wake and SPI/NPU prerequisite follow-ups. Its
+source harnesses run against that prepared tree with the reference config.
+Provider/runtime patches replay against their exact NPU pin; opt-in, lifetime,
+actual IOMMU mmap, local-input rejection, SCP snapshots, typed Pluton fault/
+concurrency and protocol tests run without hardware. Audit PE/CPIO CLI fixtures
+and the UPower D-Bus fixture checks also pass. These checks do not compile a new
+full kernel or replace the physical qualification limitations above.

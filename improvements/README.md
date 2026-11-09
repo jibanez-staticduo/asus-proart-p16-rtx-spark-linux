@@ -30,3 +30,17 @@ Run `python3 improvements/verify.py` from the repository root to check the
 exported source hashes. The kernel and telemetry guides describe the function
 tests. [sources.json](sources.json) records exact provenance; `SHA256SUMS` covers
 the files in this directory, excluding itself.
+
+## Optional platform components
+
+- [NPU source fixes and manual build/qualification](npu/README.md): opt-in
+  provider, mmap correction, local firmware/compiler preparation and ONNX tools.
+- [SCP/Pluton diagnostics](diagnostics/README.md): small patches against pinned
+  upstream sources; no duplicate sensor, autoload, TPM or firmware update API.
+- [Read-only kernel/UKI audit and USB4 proposal](tools/README.md): manual tools,
+  no update hook, boot edits, hardware query or automatic promotion.
+- [Critical-battery policy](policy/README.md): optional UPower PowerOff action,
+  unchanged thresholds and no fixed charge limit.
+
+All are source inputs. Nothing is installed or enabled by checking out this
+repository. Firmware/compiler inputs remain local under their separate licenses.

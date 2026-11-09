@@ -82,3 +82,9 @@
 9103-asus-capability-aware-initialization.patch
 9104-spi-hid-acpi-reset-handle.patch
 9105-mt7925-mld-membership.patch
+9106-pinctrl-unsupported-debounce.patch
+9107-xhci-acpi-gpio-wake.patch
+9110-n1x-sroot-noncoherent-dma.patch
+9111-spi-hid-serialize-get.patch
+9112-spi-hid-stream-only.patch
+9113-spi-hid-native-input-length.patch
