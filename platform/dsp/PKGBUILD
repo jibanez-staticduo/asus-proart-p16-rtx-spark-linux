@@ -14,7 +14,7 @@ source=('n1x_adsp.c' 'n1x_sroot_client.h' 'n1x_sroot_firmware.h' 'Kbuild' 'dkms.
         'test_primary.py' 'test_lifecycle.py' 'n1x_adsp_pcm.h' 'pcm_test.c'
         'mt8901-afe-sram.h' 'test_pcm_service.py' 'test_period.py' 'test_producer.py' 'test_trigger.py'
         'test_pm.py' 'test_device_lookup.py' 'test_provider.py')
-sha256sums=('ded5f56014410950e4269493a0e69087fc857849ec0bafe9f8ba44a5f0979e3b'
+sha256sums=('1cc2d27fd627c54bdb10981f683706a08402b935ad03e7095b5cc4f49b36ace7'
             '9c1e58c7bc8b03645754b231163d7aadc1d04d21f7155639fd74ee96f4499bfb'
             'a1c5ae8f548dfb8224106011dc53a41885c9a18733028cac8c56c321e18d0a28'
             '4d55396218d88caa986b4d25628b494fc0ddc746aedd2d1367a7b977bdb43427'

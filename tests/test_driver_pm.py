@@ -1,5 +1,6 @@
 """Run actual PM regressions and verify reproducible DKMS source packages."""
 import hashlib
+import re
 from pathlib import Path
 import subprocess
 import unittest
@@ -30,3 +31,13 @@ class DriverPMTests(unittest.TestCase):
                     filename, expected = record.split('\t')
                     self.assertEqual(hashlib.sha256((directory / filename).read_bytes()).hexdigest(),
                                      expected, f'{name}/{filename}')
+
+    def test_dsp_module_dkms_and_package_versions_agree(self):
+        directory = ROOT/'platform/dsp'
+        package = re.search(r'^pkgver=(.+)$', (directory/'PKGBUILD').read_text(), re.M).group(1)
+        module = re.search(r'MODULE_VERSION\("([^"\n]+)"\)',
+                           (directory/'n1x_adsp.c').read_text()).group(1)
+        dkms = re.search(r'^PACKAGE_VERSION="([^"\n]+)"$',
+                         (directory/'dkms.conf').read_text(), re.M).group(1)
+        self.assertEqual(module, package)
+        self.assertEqual(dkms, package)
