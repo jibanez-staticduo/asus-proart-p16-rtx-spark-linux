@@ -16,6 +16,8 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 NPU = ROOT.parent / 'n1x-lab/npu'
 FILES = {
+    'dsp/validation': ('n1x_adsp_route_check.c', 'n1x_adsp_primary_check.c',
+                       'n1x_adsp_task_check.c', 'Kbuild'),
     'dsp': ('n1x_adsp.c', 'n1x_adsp_client.h', 'n1x_adsp_pcm.h', 'n1x_adsp_ipc.h',
             'n1x_sroot_client.h', 'n1x_sroot_firmware.h', 'Kbuild'),
     'pluton': ('n1x_pluton.c', 'n1x_pluton_protocol.h', 'n1x_pluton_uapi.h',
@@ -26,7 +28,9 @@ FILES = {
     'sensorhub': ('spi-hid-core.c', 'spi-hid-acpi.c', 'spi-hid.h', 'spi-hid-core.h',
                   'spi-hid-trace.h', 'Kbuild'),
 }
-MODULES = {'dsp': ('n1x_adsp.ko',), 'provider': ('n1x_npu_bootstrap.ko',),
+MODULES = {'dsp': ('n1x_adsp.ko',),
+           'dsp/validation': ('n1x_adsp_route_check.ko', 'n1x_adsp_primary_check.ko',
+                              'n1x_adsp_task_check.ko'), 'provider': ('n1x_npu_bootstrap.ko',),
            'pluton': ('n1x_pluton.ko',), 'scp': ('n1x_scp.ko',),
            'als': ('hid-sensor-als.ko',), 'sensorhub': ('spi-hid.ko', 'spi-hid-acpi.ko'),
            'hwmon': ('spbm.ko',),
@@ -180,6 +184,8 @@ def build(output, manifest):
         else:
             command = ['make', '-C', str(kernel), 'M=' + str(directory), 'W=1',
                        '-j' + str(manifest['jobs']), 'modules']
+            if kind == 'dsp/validation':
+                command.append('KBUILD_EXTRA_SYMBOLS=' + str(output / 'dsp/Module.symvers'))
             if kind == 'tests':
                 command.append('CONFIG_N1X_PROTOCOL_KUNIT_TEST=m')
         with log.open('w') as stream:

@@ -44,7 +44,8 @@ Use a different output directory and release for `--debug kcsan` (for example,
 release 30). KASAN and KCSAN are separate kernel configurations. Both enable
 lockdep, DMA-API debugging and KUnit. Completed builds check that Kconfig kept
 the required options. The module builder also produces the native protocol
-KUnit module for debug candidates and checks kernel/module identities. Build
+KUnit module for debug candidates, the three matching DSP validation clients
+and checks kernel/module identities. Build
 manifests pin every input and output; do not substitute a module from another
 kernel or a later checkout. Use the existing `--resume --build` path only for
 the original unchanged candidate.
