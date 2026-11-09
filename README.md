@@ -17,6 +17,22 @@ The ACPI implementation, ARM64 ACPI allocation fix, touchpad workaround and
 speaker-firmware extraction metadata used here are described with their exact
 origins and local adaptations in [Provenance and local additions](#provenance-and-local-additions).
 
+## Linux 7.3 hardware improvements (BIOS 303)
+
+A separate [hardware patch guide](improvements/README.md) provides an ordered
+Linux 7.3 series with its N1X prerequisites, coordinated s2idle and LPS0 timing,
+ASUS WMI on ARM64, battery-threshold preservation, capability-aware fan
+initialization, the SPI-HID ACPI reset fix for the ambient-light sensor, and the upstream
+MT7925 MLO membership correction.
+It also includes speaker-route and telemetry patches, an open PipeWire graph,
+source regression tests and [physical validation results and limits](improvements/VALIDATION.md).
+
+This is an alternative source-patch path for maintainers and other Linux
+distributions. Follow its component guides separately from the pinned
+BIOS 300/Linux 7.2.8 installation guide below. The BIOS 303 validation did not
+use a DSDT override. The neutral public audio graph still requires runtime and
+physical listening validation; the guide distinguishes it from the local setup.
+
 ## What this repository provides
 
 | Area | Included support |
