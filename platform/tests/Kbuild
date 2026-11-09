@@ -1,0 +1,2 @@
+# SPDX-License-Identifier: GPL-2.0-only
+obj-$(CONFIG_N1X_PROTOCOL_KUNIT_TEST) += n1x-protocol-test.o

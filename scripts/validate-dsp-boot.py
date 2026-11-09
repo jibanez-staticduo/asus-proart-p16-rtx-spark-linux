@@ -140,7 +140,7 @@ def main():
     probe = module("platform_probe", "validate-dsp-live.py")
     provider = module("platform_provider", "validate-sroot-provider.py")
     firmware = module("platform_firmware", "prepare-dsp-firmware.py")
-    late = module("platform_late", "install-scp.py")
+    late = module("platform_late", "boot_audit.py")
     live.check_target()
     provider_module = "n1x_npu_bootstrap" if args.installed else LAB / "npu/driver/n1x_npu_bootstrap.ko"
     expected_provider = run(["modinfo", "-F", "srcversion", provider_module]).strip()

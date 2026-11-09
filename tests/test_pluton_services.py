@@ -22,14 +22,6 @@ class PlutonServiceTests(unittest.TestCase):
     def test_driver_query_ioctl_faults_and_concurrency(self):
         subprocess.run(['python3', str(ROOT / 'platform/pluton/test_query.py')], check=True)
 
-    def test_vendor_request_vectors(self):
-        self.assertEqual(pcbi.query_request(5), bytes.fromhex('010100000101000005000000'))
-        self.assertEqual(pcbi.query_request(7), bytes.fromhex('010100000101000007000000'))
-        self.assertEqual(pcbi.query_request(4), bytes.fromhex('010100000101000004000000'))
-        for command in (0, 1, 3, 6, 8, 0xffffffff):
-            with self.assertRaisesRegex(ValueError, 'unsupported'):
-                pcbi.query_request(command)
-
     def test_versions_and_services(self):
         self.assertEqual(pcbi.decode_query(reply(7, bytes([2, 1, 2])), 7), [1, 2])
         services = struct.pack('<I', 2) + bytes([1, 1, 2, 3])
@@ -97,45 +89,6 @@ class PlutonServiceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'error reply'):
             pcbi.decode_query(reply(7, b'\x00', result=0), 7)
 
-    def test_ioctl_uses_bounded_private_buffers(self):
-        expected = reply(7, bytes([1, 1]))
-
-        def ioctl(fd, number, exchange, mutate):
-            self.assertEqual((fd, number, mutate), (123, 0xc0285002, True))
-            channel, tx_size, rx_size, actual, tx, rx, status, reserved = \
-                struct.unpack('<4I2Q2I', exchange)
-            self.assertEqual((channel, tx_size, rx_size, actual, status, reserved),
-                             (1, 12, 1024, 0, 0, 0))
-            self.assertEqual(ctypes.string_at(tx, tx_size), pcbi.query_request(7))
-            ctypes.memmove(rx, expected, len(expected))
-            struct.pack_into('<I', exchange, 12, len(expected))
-
-        with patch.object(pcbi.fcntl, 'ioctl', side_effect=ioctl):
-            self.assertEqual(pcbi.legacy_query_ioctl(123, 7), [1])
-
-    def test_ioctl_rejects_bad_length_or_transport_status(self):
-        for offset, value in ((12, 1025), (32, 4), (36, 1)):
-            def ioctl(fd, number, exchange, mutate):
-                struct.pack_into('<I', exchange, offset, value)
-            with patch.object(pcbi.fcntl, 'ioctl', side_effect=ioctl):
-                with self.subTest(offset=offset), self.assertRaises(ValueError):
-                    pcbi.legacy_query_ioctl(123, 7)
-
-    def test_device_info_ioctl_capacity(self):
-        expected = reply(4, bytes([4]) + bytes(7))
-
-        def ioctl(fd, number, exchange, mutate):
-            channel, tx_size, rx_size, actual, tx, rx, status, reserved = \
-                struct.unpack('<4I2Q2I', exchange)
-            self.assertEqual((channel, tx_size, rx_size, actual, status, reserved),
-                             (1, 12, 4096, 0, 0, 0))
-            self.assertEqual(ctypes.string_at(tx, tx_size), pcbi.query_request(4))
-            ctypes.memmove(rx, expected, len(expected))
-            struct.pack_into('<I', exchange, 12, len(expected))
-
-        with patch.object(pcbi.fcntl, 'ioctl', side_effect=ioctl):
-            self.assertEqual(pcbi.legacy_query_ioctl(123, 4)['platform_id'], 4)
-
     def test_typed_query_ioctl(self):
         expected = reply(7, bytes([1, 1]))
 
@@ -149,18 +102,13 @@ class PlutonServiceTests(unittest.TestCase):
         with patch.object(pcbi.fcntl, 'ioctl', side_effect=ioctl):
             self.assertEqual(pcbi.query_ioctl(123, 7), [1])
 
-    def test_legacy_fallback_only_for_missing_ioctl(self):
+    def test_query_errors_never_resubmit_a_request(self):
         for error in (errno.ENOTTY, errno.EOPNOTSUPP, errno.EPROTO, errno.EREMOTEIO):
             with self.subTest(error=error), \
-                    patch.object(pcbi.fcntl, 'ioctl', side_effect=OSError(error, 'query')), \
-                    patch.object(pcbi, 'legacy_query_ioctl', return_value=[1]) as legacy:
-                if error == errno.ENOTTY:
-                    self.assertEqual(pcbi.query_ioctl(123, 7), [1])
-                    legacy.assert_called_once_with(123, 7)
-                else:
-                    with self.assertRaises(OSError):
-                        pcbi.query_ioctl(123, 7)
-                    legacy.assert_not_called()
+                    patch.object(pcbi.fcntl, 'ioctl', side_effect=OSError(error, 'query')) as call:
+                with self.assertRaises(OSError):
+                    pcbi.query_ioctl(123, 7)
+                self.assertEqual(call.call_count, 1)
 
     def test_typed_query_result_validation(self):
         expected = reply(7, bytes([1, 1]))

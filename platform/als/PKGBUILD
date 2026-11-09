@@ -1,6 +1,6 @@
 pkgname=hid-sensor-als-dkms
 pkgver=0.1.0
-pkgrel=1
+pkgrel=2
 pkgdesc='Upstream HID ALS driver with per-channel descriptor scales'
 arch=('aarch64')
 url='https://github.com/torvalds/linux/commit/cad928dad9a4c26aa56b4223dc2a29bca517fb5f'
@@ -12,8 +12,8 @@ sha256sums=('27c00f8565c943b541341d3db85c73deda3fabdbe3891a5b425a2ccd12c36e1a'
             '18310793a3daa6b470ba68646fa2984eef08ebc36170fad87c21aeca76aa7f88'
             '70e4330fd44c623838e58c8b6c904fe7295de7f5db0ebec939cad61d6fb1e5d8'
             'e988e9c43654d5e1ac021769446be71d7ff10009b34efd79ead5dcb9d515580f'
-            'c26721366027d6c23c4936e1e7bcd4ba8305104d96a86f7068227f0abfc9a36e'
-            '84c94d4418402b17052ccf57e5e3a5608a6eb660179f2e7a65c4aca1968ab525'
+            '56ed407fc9b57716bf67c7b6f7a01a455fe7af8638b158602dd2b283d5da18ac'
+            'ce782a10e7ec36446f0e902ee32f15a43a042aaa8fd2f3b42ec8e5b3af000860'
             '17309618c912472766be147971f8f54944e1322e88b27e7c01701572addf71b9')
 
 check() {

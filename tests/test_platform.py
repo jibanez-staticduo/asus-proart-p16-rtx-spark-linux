@@ -26,7 +26,6 @@ inventory = module("platform_inventory", "platform-inventory.py")
 extractor = module("platform_extractor", "extract-platform-drivers.py")
 dsp = module("dsp_firmware", "prepare-dsp-firmware.py")
 live = module("platform_live", "validate-platform-live.py")
-sensor_install = module("sensor_install", "install-sensorhub.py")
 dsp_live = module("dsp_live", "validate-dsp-live.py")
 provider_live = module("provider_live", "validate-sroot-provider.py")
 dsp_boot = module("dsp_boot", "validate-dsp-boot.py")
@@ -106,23 +105,6 @@ class DSPSignedContainerTests(unittest.TestCase):
             with self.subTest(data=data):
                 with self.assertRaises(ValueError):
                     dsp.CBOR(data).complete()
-
-
-class SCPRefreshTests(unittest.TestCase):
-    def test_busy_or_failed_mailbox_never_reloads(self):
-        for refcnt, queries in (("1", "enabled"), ("0", "failed"), ("0", "disabled")):
-            with self.subTest(refcnt=refcnt, queries=queries), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                (root / "n1x_scp").mkdir()
-                (root / "n1x_scp/srcversion").write_text("DDC3B43D4121E886E058EF7")
-                (root / "n1x_scp/refcnt").write_text(refcnt)
-                debug = root / "debug"
-                debug.mkdir()
-                (debug / "status").write_text("mailbox_queries=" + queries + "\n")
-                with patch.object(platform_audit, "run", return_value="D952AC3E19ADB9131CCA01F\n") as run:
-                    with self.assertRaisesRegex(RuntimeError, "busy|failed"):
-                        platform_audit.refresh_scp({}, root, debug)
-                    run.assert_called_once_with(["modinfo", "-F", "srcversion", "n1x_scp"])
 
 
 class ProviderBootServiceTests(unittest.TestCase):
@@ -243,32 +225,6 @@ class ManagedKernelHookTests(unittest.TestCase):
                                     input="usr/lib/firmware/nvidia/n1x/sroot-v0.bin\n", text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), "Rebuilding managed Limine kernels: linux-p16-platform")
-
-
-class BootFailureRecoveryTests(unittest.TestCase):
-    def test_failed_candidate_still_selects_hashed_recovery(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            images = root / "EFI/Linux"
-            images.mkdir(parents=True)
-            recovery = images / "omarchy_linux-rtx-spark-npu.efi"
-            recovery.write_bytes(b"working recovery")
-            candidate = images / "omarchy_linux-p16-platform.efi"
-            candidate.write_bytes(b"incomplete update")
-            pin = hashlib.blake2b(recovery.read_bytes()).hexdigest()
-            bad = hashlib.blake2b(b"previous candidate").hexdigest()
-            menu = root / "limine.conf"
-            menu.write_text("default_entry: Omarchy/linux-p16-platform\ntimeout: 5\n"
-                            "//linux-p16-platform\npath: boot():/EFI/Linux/omarchy_linux-p16-platform.efi#" + bad +
-                            "\n//linux-rtx-spark-npu\npath: boot():/EFI/Linux/omarchy_linux-rtx-spark-npu.efi#" + pin + "\n")
-            script = (ROOT / "scripts/p16-boot-menu-policy").read_text()
-            script = script.replace("/run/lock/boot-partition.lock", str(root / "lock"))
-            script = script.replace("[[ $EUID == 0 ]]", "true").replace("/boot", str(root))
-            script = script.replace("/usr/local/sbin/p16-platform-update-check", "/usr/bin/false")
-            result = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("hash mismatch", result.stderr)
-            self.assertIn("default_entry: Omarchy/linux-rtx-spark-npu", menu.read_text())
 
 
 class ACPICapabilityTests(unittest.TestCase):
@@ -459,75 +415,6 @@ class DSPProbeTrialTests(unittest.TestCase):
                 self.assertEqual(calls[-1], ["modprobe", "snd_sof_mt8901"])
                 self.assertEqual(["rmmod", "n1x_adsp"] in calls, not failed_insert)
                 self.assertEqual(report["restored"], {"restored": True})
-
-
-class SensorBootInstallTests(unittest.TestCase):
-    def test_original_module_uses_verified_dkms_backup_when_in_tree_copy_was_moved(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            release = "7.2.8-test"
-            original = root / "modules" / release / "kernel/drivers/hid/spi-hid/spi-hid.ko"
-            cache = root / "backups" / release / "aarch64" / "spi-hid.ko"
-            cache.parent.mkdir(parents=True)
-            cache.write_bytes(b"original kernel driver")
-            origin = Path(str(cache) + ".origin")
-            origin.write_text(str(original))
-            self.assertEqual(sensor_install.original_module("spi-hid", release,
-                root / "modules", root / "backups", "aarch64"), cache)
-            origin.write_text(str(root / "another-driver.ko"))
-            with self.assertRaisesRegex(RuntimeError, "Expected one original"):
-                sensor_install.original_module("spi-hid", release,
-                    root / "modules", root / "backups", "aarch64")
-
-    def test_installed_status_accepts_original_module_note_but_rejects_built_only(self):
-        release = "7.2.8-23-omarchy-p16-asus"
-        prefix = "n1x-sensorhub/0.1.0, " + release + ", aarch64: "
-        for suffix in ("installed", "installed (Original modules exist)"):
-            self.assertTrue(sensor_install.installed_for(prefix + suffix + "\n", release))
-        for suffix in ("built", "added", "broken"):
-            self.assertFalse(sensor_install.installed_for(prefix + suffix + "\n", release))
-        self.assertFalse(sensor_install.installed_for(prefix + "installed\n", release + "-npu2"))
-
-    def menu(self):
-        return ("default_entry: Omarchy/linux-rtx-spark-npu\n"
-                "  //linux-rtx-spark-npu\n"
-                "  path: boot():/EFI/Linux/omarchy_linux-rtx-spark-npu.efi#" + "a" * 128 + "\n"
-                "  cmdline: root=/dev/mapper/root console=tty0\n"
-                "  //linux-p16-asus-23\n"
-                "  path: boot():/EFI/Linux/omarchy_linux-p16-asus-23.efi#" + "b" * 128 + "\n"
-                "  cmdline: recovery\n")
-
-    def test_only_selected_image_hash_changes(self):
-        before = self.menu()
-        path, pin, command = sensor_install.uki_entry(before, "linux-rtx-spark-npu")
-        self.assertEqual(command, "root=/dev/mapper/root console=tty0")
-        after = sensor_install.replace_pin(before, path, pin, "c" * 128)
-        self.assertEqual(after.replace("c" * 128, "a" * 128), before)
-        self.assertIn("omarchy_linux-p16-asus-23.efi#" + "b" * 128, after)
-
-    def test_ambiguous_hash_token_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "duplicated"):
-            sensor_install.replace_pin(self.menu() * 2,
-                "/EFI/Linux/omarchy_linux-rtx-spark-npu.efi", "a" * 128, "c" * 128)
-
-    def test_nonstandard_efi_path_is_rejected(self):
-        menu = self.menu().replace("/EFI/Linux/omarchy_linux-rtx-spark-npu.efi", "/EFI/Linux/../other.efi")
-        with self.assertRaisesRegex(ValueError, "Unexpected UKI path"):
-            sensor_install.uki_entry(menu, "linux-rtx-spark-npu")
-
-    def test_failed_copy_verification_preserves_old_boot_image(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source, target = root / "staged.efi", root / "existing.efi"
-            source.write_bytes(b"new verified image")
-            target.write_bytes(b"known working image")
-            check = sensor_install.digest
-            with patch.object(sensor_install, "digest", side_effect=lambda p:
-                              "corrupt" if Path(p).name.startswith(".p16-sensorhub-") else check(p)):
-                with self.assertRaisesRegex(RuntimeError, "Copy verification failed"):
-                    sensor_install.atomic_copy(source, target)
-            self.assertEqual(target.read_bytes(), b"known working image")
-            self.assertEqual(sorted(x.name for x in root.iterdir()), ["existing.efi", "staged.efi"])
 
 
 class LiveTrialTests(unittest.TestCase):

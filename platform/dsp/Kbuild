@@ -1,1 +1,5 @@
-obj-m += n1x_adsp.o
+# SPDX-License-Identifier: GPL-2.0-only
+ifeq ($(KBUILD_EXTMOD),$(abspath $(src)))
+CONFIG_N1X_ADSP ?= m
+endif
+obj-$(CONFIG_N1X_ADSP) += n1x_adsp.o

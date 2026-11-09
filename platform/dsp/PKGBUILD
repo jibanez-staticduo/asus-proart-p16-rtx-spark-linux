@@ -1,6 +1,6 @@
 pkgname=n1x-adsp-dkms
 pkgver=0.1.15
-pkgrel=1
+pkgrel=2
 pkgdesc='MT8901 DSP secure boot, IPC and playback services'
 arch=('aarch64')
 url='https://github.com/johannhartmann/asus-proart-p16-rtx-spark-linux'
@@ -17,17 +17,17 @@ source=('n1x_adsp.c' 'n1x_sroot_client.h' 'n1x_sroot_firmware.h' 'Kbuild' 'dkms.
 sha256sums=('f23545fe81745ad1bd500675bd2dfa7e8363d041d1900f4e4629d41f17f01c4f'
             'e189d3499807d5be8209bed9d441d7c125368c59043ef9d0a7aefca15afb3559'
             'a1c5ae8f548dfb8224106011dc53a41885c9a18733028cac8c56c321e18d0a28'
-            '230086b8afc95aea40727de3a89c05228cd79b78854e8973eefb06b65d740c02'
+            '4d55396218d88caa986b4d25628b494fc0ddc746aedd2d1367a7b977bdb43427'
             '9cd0a8c5e1c8b5365fed1a04b69c162f0332f9c25dc1d2f3c7d02e5cc3e36867'
-            '8beebbc715402c0bbea8120cbc29f2c601ade0c89589403d8aef6cc88cb56e36'
-            '73ef7bfa335c1c59e8b7ed2ccb232ab5ae3fc95ae7c288d5d3c6e72d6b099664'
-            '333e0e15934e571d381d83d0b715812d5e38c740de2d9f09aac70299149f5391'
+            '30526b1d0d7132f88db4fa469587cbbb3c23557204878e80b04a5c0694208cfb'
+            'cc827bd4f079e4d10df85bda3502d7681e9c07e68c089781f448caad048b9cca'
+            '29dbc8ad33d5492b81657bf4853ab6041be1c7e95fe336e7130ff20ccee195dc'
             '810a6a57b4a26ed4c7f1e936732e5c7204aa7edb6df76a6117eb0d717381848a'
             '065f50cda1705bba540aed2ca8888d6c9c2e67052484139454396c85bbb12b67'
             '5396112c2d00788e5b742ab4d9c9a286b750de50b97faf04a370386a78cdffdf'
             'e9aa0dcc0da19dd325a05c645cc3e7cbf4889bfdbd585ab3e84f5ec60afb7eed'
             '4179280ce67720d36b3eb23b86159a3bac59a26e855c717f5cf7ec6081478b7a'
-            'e54a8478095bc2eea4eb3fa87fbd9d2acbfe742f3fa1984fdce97d64d1762fbd'
+            'fc8a245bb59c3604c0ec72868654f67e03ced2b365e16a753ced2f767b0ac423'
             'ad07cfd2f8fab040e6558c2946311c3ad4be99f8a3e8dd59625249492483b71f'
             'bf9f936e7c9fbbb3467be4f241227e815f84e7d272c60507578230814aa9fdd6'
             '7f696a92fbe1cd1d45922b158a9ffd32ae89cde5c4c6578abd68a4f431ee541c'

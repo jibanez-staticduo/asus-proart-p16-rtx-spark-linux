@@ -5,9 +5,6 @@ Type = Package
 Target = linux-omarchy
 Target = linux-p16-platform
 Target = linux-p16-platform-*
-Target = linux-p16-asus-23
-Target = linux-p16-asus-23-npu2
-Target = linux-rtx-spark-npu
 Target = limine
 Target = limine-mkinitcpio-hook
 Target = mkinitcpio
@@ -17,4 +14,4 @@ Target = plymouth*
 [Action]
 Description = Verifying P16 Limine images and restoring the default boot policy...
 When = PostTransaction
-Exec = /usr/local/sbin/p16-boot-menu-policy
+Exec = /usr/lib/p16-platform/boot-menu

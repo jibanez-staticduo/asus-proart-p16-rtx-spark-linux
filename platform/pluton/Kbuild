@@ -1,1 +1,5 @@
-obj-m += n1x_pluton.o
+# SPDX-License-Identifier: GPL-2.0-only
+ifeq ($(KBUILD_EXTMOD),$(abspath $(src)))
+CONFIG_N1X_PLUTON ?= m
+endif
+obj-$(CONFIG_N1X_PLUTON) += n1x_pluton.o

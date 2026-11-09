@@ -1,0 +1,21 @@
+{
+  "start_monotonic_s": 97901.527745817,
+  "end_monotonic_s": 97944.633400931,
+  "all_nvidia_or_thermal_error_lines_during_run": [
+    {
+      "message": "NVRM: --- last print repeated 4 times ---",
+      "monotonic_s": 97934.270053,
+      "timestamp_us": "1794048574758542"
+    },
+    {
+      "message": "NVRM: GPU0 nvCheckOkFailedNoLog: Check failed: Out of memory [NV_ERR_NO_MEMORY] (0x00000051) returned from _memdescAllocInternal(pMemDesc) @ mem_desc.c:1348",
+      "monotonic_s": 97934.270292,
+      "timestamp_us": "1794048574758783"
+    },
+    {
+      "message": "NVRM: GPU0 nvCheckOkFailedNoLog: Check failed: Out of memory [NV_ERR_NO_MEMORY] (0x00000051) returned from _memdescAllocInternal(pMemDesc) @ mem_desc.c:1348",
+      "monotonic_s": 97934.295051,
+      "timestamp_us": "1794048574783541"
+    }
+  ]
+}

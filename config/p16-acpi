@@ -7,7 +7,7 @@ build() {
     # Use the live firmware DSDT: a captured DSDT embeds a boot-specific GNVS
     # physical address. The installed acpi_osi="!Windows 2022" command line
     # already supplies the SSPM _STA behavior that the old DSDT patch changed.
-    add_file_early /etc/initcpio/p16-acpi/SSDT.aml /kernel/firmware/acpi/SSDT.aml
+    add_file_early /usr/lib/firmware/acpi/p16/SSDT.aml /kernel/firmware/acpi/SSDT.aml
 }
 help() {
     echo 'H7607BA.300 ASUS EC/battery SSDT with the native firmware DSDT; requires acpi_osi="!Windows 2022".'

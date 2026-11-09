@@ -7,17 +7,8 @@ export PATH=/usr/bin:/bin
 plan=false
 if [[ ${1:-} == --plan ]]; then plan=true; fi
 declare -A managed=()
-while IFS= read -r package; do
-  [[ $package ]] || continue
-  case $package in linux-p16-asus-23|linux-p16-asus-23-npu2|linux-rtx-spark-npu) continue ;; esac
-  pacman -Qq "$package" &>/dev/null || continue
-  managed["$package"]=1
-done < <(awk '/^[[:space:]]*comment: kernel-id=/ {
-  sub(/^[[:space:]]*comment: kernel-id=/, ""); print $1
-}' /boot/limine.conf | sort -u)
-
-# New P16 kernel packages participate immediately, before their first menu
-# entry exists. Earlier bring-up kernels above stay frozen as recovery.
+# Only kernel packages in the maintained namespace participate. Recovery and
+# unrelated kernels remain outside this wrapper, regardless of release number.
 for base in /usr/lib/modules/*/pkgbase; do
   package=$(<"$base")
   [[ $package == linux-p16-platform || $package == linux-p16-platform-* ]] || continue
@@ -64,7 +55,7 @@ for package in "${packages[@]}"; do
     [[ $(<"$base") == "$package" ]] || continue
     directory=${base%/pkgbase}
     if [[ $package == linux-p16-platform || $package == linux-p16-platform-* ]]; then
-      /usr/local/sbin/p16-platform-update-check --release "${directory##*/}"
+      /usr/bin/p16-platform-update-check --release "${directory##*/}"
     fi
   done
 done
@@ -82,7 +73,7 @@ for package in "${packages[@]}"; do
     [[ $(<"$base") == "$package" ]] || continue
     directory=${base%/pkgbase}
     if [[ $package == linux-p16-platform || $package == linux-p16-platform-* ]]; then
-      /usr/local/sbin/p16-platform-update-check --image "$image" --release "${directory##*/}"
+      /usr/bin/p16-platform-update-check --image "$image" --release "${directory##*/}"
     fi
   done
 done

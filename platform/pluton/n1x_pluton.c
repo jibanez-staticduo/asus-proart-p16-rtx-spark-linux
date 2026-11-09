@@ -42,10 +42,6 @@ static bool enable_transport;
 module_param(enable_transport, bool, 0400);
 MODULE_PARM_DESC(enable_transport, "Enable PFI mailbox transactions; disabled until explicitly requested");
 
-static bool enable_raw_exchange;
-module_param(enable_raw_exchange, bool, 0400);
-MODULE_PARM_DESC(enable_raw_exchange, "Permit CAP_SYS_RAWIO raw exchanges; disabled by default");
-
 struct n1x_pluton {
 	struct kref reference;
 	struct mutex lock;
@@ -56,6 +52,10 @@ struct n1x_pluton {
 	bool poisoned;
 	bool removed;
 	bool suspended;
+};
+
+struct n1x_pluton_transfer {
+	u32 channel, tx_size, rx_size, rx_actual;
 };
 
 /* Resource 1 aliases register zero as stride metadata. The mailbox register
@@ -282,7 +282,7 @@ static int n1x_pfi_channels(struct n1x_pluton *p, struct n1x_pluton_channels *ch
 	return 0;
 }
 
-static int n1x_pluton_rpc(struct n1x_pluton *p, struct n1x_pluton_exchange *exchange,
+static int n1x_pluton_rpc(struct n1x_pluton *p, struct n1x_pluton_transfer *exchange,
 			  const u8 *tx, u8 *rx, unsigned long deadline)
 {
 	struct n1x_pluton_channels channels;
@@ -325,7 +325,7 @@ static int n1x_pluton_rpc(struct n1x_pluton *p, struct n1x_pluton_exchange *exch
 static long n1x_pluton_query_ioctl(struct n1x_pluton *p, void __user *user)
 {
 	struct n1x_pluton_query query;
-	struct n1x_pluton_exchange exchange = {
+	struct n1x_pluton_transfer exchange = {
 		.channel = N1X_PCBI_QUERY_SERVICE,
 		.tx_size = 12,
 	};
@@ -387,43 +387,18 @@ static long n1x_pluton_ioctl(struct file *file, unsigned int command, unsigned l
 	void __user *user = (void __user *)arg;
 	struct n1x_pluton_info info = { };
 	struct n1x_pluton_channels channels;
-	struct n1x_pluton_exchange exchange = { };
-	u8 *tx = NULL, *rx = NULL;
 	unsigned long deadline;
 	int ret;
 
 	if (command == N1X_PLUTON_QUERY)
 		return n1x_pluton_query_ioctl(p, user);
-	if (command != N1X_PLUTON_INFO && command != N1X_PLUTON_CHANNELS &&
-	    command != N1X_PLUTON_EXCHANGE)
+	if (command != N1X_PLUTON_INFO && command != N1X_PLUTON_CHANNELS)
 		return -ENOTTY;
-	if (command != N1X_PLUTON_INFO && !capable(CAP_SYS_RAWIO))
+	if (command == N1X_PLUTON_CHANNELS && !capable(CAP_SYS_RAWIO))
 		return -EPERM;
-	if (command == N1X_PLUTON_EXCHANGE && !enable_raw_exchange)
-		return -EOPNOTSUPP;
-	if (command == N1X_PLUTON_EXCHANGE) {
-		if (copy_from_user(&exchange, user, sizeof(exchange)))
-			return -EFAULT;
-		if (!exchange.channel || exchange.channel > U8_MAX || exchange.reserved ||
-		    exchange.tx_size < 12 || exchange.tx_size > N1X_PFI_MAX_MESSAGE ||
-		    exchange.rx_size < 16 || exchange.rx_size > N1X_PFI_MAX_MESSAGE)
-			return -EINVAL;
-		tx = memdup_user(u64_to_user_ptr(exchange.tx_ptr), exchange.tx_size);
-		if (IS_ERR(tx))
-			return PTR_ERR(tx);
-		if (tx[1] != exchange.channel) {
-			ret = -EINVAL;
-			goto free;
-		}
-		rx = kvzalloc(exchange.rx_size, GFP_KERNEL);
-		if (!rx) {
-			ret = -ENOMEM;
-			goto free;
-		}
-	}
 	ret = mutex_lock_interruptible(&p->lock);
 	if (ret)
-		goto free;
+		return ret;
 	if (p->removed || p->suspended) {
 		ret = -ENODEV;
 		goto unlock;
@@ -441,26 +416,12 @@ static long n1x_pluton_ioctl(struct file *file, unsigned int command, unsigned l
 	}
 	deadline = jiffies + msecs_to_jiffies(10000);
 	ret = n1x_rot_init(p, deadline);
-	if (ret)
-		goto unlock;
-	if (command == N1X_PLUTON_CHANNELS) {
+	if (!ret)
 		ret = n1x_pfi_channels(p, &channels, deadline);
-		if (!ret && copy_to_user(user, &channels, sizeof(channels)))
-			ret = -EFAULT;
-	} else {
-		exchange.rx_actual = 0;
-		ret = n1x_pluton_rpc(p, &exchange, tx, rx, deadline);
-		exchange.remote_status = p->last_pfi_status;
-		if (!ret && copy_to_user(u64_to_user_ptr(exchange.rx_ptr), rx, exchange.rx_actual))
-			ret = -EFAULT;
-		if (copy_to_user(user, &exchange, sizeof(exchange)))
-			ret = -EFAULT;
-	}
+	if (!ret && copy_to_user(user, &channels, sizeof(channels)))
+		ret = -EFAULT;
 unlock:
 	mutex_unlock(&p->lock);
-free:
-	kfree(tx);
-	kvfree(rx);
 	return ret;
 }
 
@@ -594,4 +555,4 @@ static struct platform_driver n1x_pluton_driver = {
 module_platform_driver(n1x_pluton_driver);
 MODULE_DESCRIPTION("N1X ROT1 PCBI query service and PFI transport");
 MODULE_LICENSE("GPL");
-MODULE_VERSION("0.2.0");
+MODULE_VERSION("0.3.0");

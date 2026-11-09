@@ -6,10 +6,10 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from test_native_dsdt_recovery import fixture
+from fixtures import fixture
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location('late_install', ROOT / 'scripts/install-scp.py')
+spec = importlib.util.spec_from_file_location('late_install', ROOT / 'scripts/boot_audit.py')
 installer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(installer)
 

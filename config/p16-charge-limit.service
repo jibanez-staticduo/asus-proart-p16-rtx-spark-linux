@@ -1,17 +1,10 @@
 [Unit]
-Description=Apply P16 battery charge limit (100 percent)
-After=systemd-udev-trigger.service p16-asus-controls.service
-Wants=p16-asus-controls.service
-ConditionKernelVersion=|7.2.8-14-omarchy-p16-asus
-ConditionKernelVersion=|7.2.8-23-omarchy-p16-asus
-ConditionKernelVersion=|7.2.8-23-omarchy-p16-asus-npu2
-ConditionKernelVersion=|7.2.8-23-rtx-spark-npu
+Description=Apply battery charge threshold
+After=systemd-modules-load.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/libexec/p16-charge-limit
-RemainAfterExit=yes
-TimeoutStartSec=20
+ExecStart=/usr/bin/systemd-tmpfiles --create /usr/lib/tmpfiles.d/p16-charge-limit.conf
 
 [Install]
 WantedBy=multi-user.target

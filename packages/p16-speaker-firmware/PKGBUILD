@@ -1,0 +1,20 @@
+pkgname=p16-speaker-firmware
+pkgver=1.1.0
+pkgrel=1
+pkgdesc='Locally extracted ASUS/Cirrus speaker firmware for subsystem 10431484'
+arch=('aarch64')
+license=('LicenseRef-ASUS-Cirrus')
+source=('cs35l56-b0-dsp1-misc-10431484-spkid0.wmfw'
+        'cs35l56-b0-dsp1-misc-10431484-spkid0-l1u0.bin'
+        'cs35l56-b0-dsp1-misc-10431484-spkid0-l1u1.bin')
+sha256sums=('828f2822701d06cb95d8da5ec8e2a5033b901ec4609a9a31e4336c38d133bdc3'
+            '46a6a2d55786a661c1a21c8ea4a2d0bbf9d87bb28342750699c012743a2773ac'
+            'd9795f52b7c62f01de42a57b6a6f584e011746d1d48b99f62017a15b8199aedc')
+
+package() {
+  local file
+  for file in "${source[@]}"; do
+    install -Dm644 "$srcdir/$file" "$pkgdir/usr/lib/firmware/cirrus/$file"
+    ln -s "$file" "$pkgdir/usr/lib/firmware/cirrus/${file/spkid0/spkid1}"
+  done
+}

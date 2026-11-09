@@ -1,0 +1,12 @@
+pkgname=p16-acpi-firmware
+pkgver=1.0.0
+pkgrel=1
+pkgdesc='Locally generated ASUS P16 ACPI SSDT override'
+arch=('aarch64')
+license=('LicenseRef-ASUS-ACPI')
+source=('SSDT.aml')
+sha256sums=('9b28ffc14c19f8b7ea2278de88ff9ec070f5f70401107d81fef067a916aa9695')
+
+package() {
+  install -Dm644 "$srcdir/SSDT.aml" "$pkgdir/usr/lib/firmware/acpi/p16/SSDT.aml"
+}

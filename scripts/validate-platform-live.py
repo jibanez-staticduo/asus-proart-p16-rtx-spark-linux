@@ -22,7 +22,7 @@ import time
 import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_REPORT = ROOT.parent / "n1x-lab/results/platform-enablement-20261104/live-validation.json"
+DEFAULT_REPORT = ROOT / "build/live-validation.json"
 CALIBRATION = "SCPCaliResult-da86db63-0b44-45a4-ad9a-254393010385"
 
 

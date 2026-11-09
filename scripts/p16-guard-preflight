@@ -9,7 +9,7 @@ if ! pacman-conf NoUpgrade | grep -Fxq 'etc/pacman.d/hooks/90-mkinitcpio-install
   echo 'P16: NoUpgrade for the mkinitcpio hook is missing. Restore the guard before updating.' >&2
   exit 1
 fi
-if ! cmp -s "$template" "$hook" || [[ ! -x /usr/local/sbin/p16-mkinitcpio-managed ]]; then
+if ! cmp -s "$template" "$hook" || [[ ! -x /usr/lib/p16-platform/mkinitcpio ]]; then
   echo 'P16: managed-kernel mkinitcpio hook or wrapper is missing. Restore the guard before updating.' >&2
   exit 1
 fi

@@ -14,10 +14,10 @@ ALS = ROOT / 'platform/als'
 
 class ALSScaleTests(unittest.TestCase):
     def test_install_rejects_embedded_als_with_either_module_spelling(self):
-        spec = importlib.util.spec_from_file_location('als_installer', ROOT / 'scripts/install-scp.py')
+        spec = importlib.util.spec_from_file_location('als_installer', ROOT / 'scripts/boot_audit.py')
         installer = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(installer)
-        from test_native_dsdt_recovery import fixture
+        from fixtures import fixture
         with tempfile.TemporaryDirectory() as directory:
             boot = Path(directory)
             images = boot / 'EFI/Linux'

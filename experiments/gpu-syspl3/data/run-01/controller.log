@@ -1,0 +1,4 @@
+Baseline recording started
+SysPL3 request applied: 125000 mW (EC 130000 mW)
+State, temperature or kernel-error guard tripped
+Final request=0 effective=130000 EC=130000 clean=1 result=3

@@ -25,12 +25,5 @@
     "color_temperature": 0,
     "chromaticity_x": -4,
     "chromaticity_y": -4
-  },
-  "hardware_validated": true,
-  "hardware_result": {
-    "boot_id": "db4397f4-646b-4b7d-9831-567db6218147",
-    "module_srcversion": "C8F5A044842EF0793DB86D3",
-    "evidence": "n1x-lab/results/platform-enablement-20261106/als-upstream-trial.json",
-    "scope": "Descriptor scales and all five IIO raw channels; optical calibration unverified"
   }
 }

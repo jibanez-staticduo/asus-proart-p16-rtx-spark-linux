@@ -136,7 +136,7 @@ def main():
     if args.report.exists() or args.report.with_suffix("").exists():
         parser.error("Choose a new report path")
     live = load_script("platform_live", "validate-platform-live.py")
-    late = load_script("platform_late", "install-scp.py")
+    late = load_script("platform_late", "boot_audit.py")
     live.check_target()
     candidate = live.check_module(args.candidate)
     source_version = run(["modinfo", "-F", "srcversion", candidate]).strip()

@@ -27,5 +27,5 @@ Target = mkinitcpio-git
 [Action]
 Description = Updating managed P16 initcpios while preserving experimental UKIs...
 When = PostTransaction
-Exec = /usr/local/sbin/p16-mkinitcpio-managed
+Exec = /usr/lib/p16-platform/mkinitcpio
 NeedsTargets
