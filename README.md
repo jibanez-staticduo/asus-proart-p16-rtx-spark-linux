@@ -39,6 +39,9 @@ DSP, SCP and Pluton support normal Kconfig/Kbuild integration and external
 module builds. Each driver's PKGBUILD supplies DKMS packaging. See
 [platform build instructions](platform/README.md) for native KUnit tests.
 
+On a fresh Omarchy Nightly installation, run `omarchy update -y` before
+installing build dependencies so the online package databases are available.
+
 Prepare board firmware locally:
 
 ```sh
@@ -78,6 +81,11 @@ attributes through systemd-tmpfiles. Its udev rule also handles battery
 appearance. Adjust the policy through the normal systemd configuration
 override directories if a different charge limit is wanted.
 
+At critical battery charge, the policy package configures UPower to power
+off instead of suspending and continuing to drain the battery. Run
+`sudo systemctl restart upower` after installing or upgrading this policy;
+`scripts/verify-platform-install.py` checks the running daemon's action.
+
 The NPU/SROOT provider has a separate package and boot service; see
 [update procedures](docs/update-safe.md). DSP boot and playback remain
 experimental and are disabled by default. Published DSP memory stays retained
@@ -98,3 +106,15 @@ firmware transport, memory ownership and playback callbacks run in C drivers.
 
 See [LICENSES.md](LICENSES.md) for source and OEM asset terms. Contributor
 attribution, license headers and existing patch sign-offs are preserved.
+
+## Installation field report
+
+A second H7607BA (SKU 90NB16A1-M00Y90; 64 GB, 3K OLED, 1 TB;
+BIOS H7607BA.300, EC 2.16) completed the older installation guide at commit
+`4b34f31` on Nightly 2026.10.26.466, with `omarchy update -y` before
+installing dependencies. On `7.2.8-23-omarchy-p16-asus`, the boot checks
+passed; the keyboard, touchpad (`093A:4F01`) and touchscreen/stylus
+(`222A:5554`) enumerated, and the touchpad worked in use. Battery charge,
+power profiles, the SoundWire card and NVIDIA driver 615.78.08 were present.
+Audible playback, CUDA and suspend were not tested. This report predates the
+package-based instructions above and does not validate the newer procedure.
