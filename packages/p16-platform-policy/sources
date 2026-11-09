@@ -26,3 +26,4 @@ scripts/install-mkinitcpio-guard.sh
 scripts/p16-platform-update-check
 scripts/p16-temperatures
 licenses/MIT.txt
+config/50-p16-critical.conf

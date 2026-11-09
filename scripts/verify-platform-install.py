@@ -61,6 +61,11 @@ def main():
     try:
         report["packages"] = run(["pacman", "-Q", *PACKAGES]).splitlines()
         report["dkms"] = run(["dkms", "status"], timeout=120)
+        report["upower_critical_action"] = run([
+            "busctl", "--system", "call", "org.freedesktop.UPower",
+            "/org/freedesktop/UPower", "org.freedesktop.UPower", "GetCriticalAction"]).strip()
+        if report["upower_critical_action"] != 's "PowerOff"':
+            raise RuntimeError("Running UPower critical action is not PowerOff; restart upower")
         service = "n1x-platform-npu.service"
         report["npu_service_name"] = service
         report["npu_service"] = run(["systemctl", "show", service,
