@@ -18,8 +18,8 @@ not the new context/client code.
 ## Reproducible candidates
 
 The device-bound DSP candidate requires NPU provider source
-[`8137ccc`](https://github.com/johannhartmann/n1x-npu-linux/commit/8137cccb515eb15bd23e4bb10689334cd4df771f)
-or a descendant containing ABI v3. Use that checkout for the sibling NPU tree.
+[`976e392`](https://github.com/johannhartmann/n1x-npu-linux/commit/976e3925724de72adeb227a41c9864879254d837)
+or an ABI-compatible merged revision. Use that checkout for the sibling NPU tree.
 First run the offline suites and pin the matching provider snapshot:
 
 ```sh
