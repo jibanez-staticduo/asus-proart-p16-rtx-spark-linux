@@ -54,10 +54,15 @@ They remain upstream blockers for the experimental firmware paths.
 ACPI IDs and checked firmware ABIs identify supported IP. A model name, BIOS
 version, generated `:00` device name or userspace boot order is not a general
 supplier binding. The shared SROOT service currently lives in the NPU module;
-DSP and AFE use dynamically resolved, versioned kernel interfaces. Upstream work
-needs an independently owned supplier interface and driver-core dependency
-ordering. Use firmware-described associations and device links where justified;
-do not fabricate links between the first globally matching ACPI devices.
+DSP and AFE use dynamically resolved, versioned kernel interfaces. The bound NPU
+aggregate owns a stateless DLA-to-SROOT device link for system PM and shutdown
+ordering; the component framework alone does not provide this ordering. The
+link is established before firmware publication, remains across post-publication
+failures and is explicitly removed during component unbind. Existing runtime-PM
+leases are unchanged. Upstream work still needs an independently owned supplier
+interface, per-aggregate state and DSP consumer dependency ordering. Use
+firmware-described associations where justified; do not fabricate links between
+the first globally matching ACPI devices.
 
 Use hwmon for calibrated telemetry, IIO for sensors, ALSA/ASoC for audio and DRM
 accel for inference. Do not move vendor compiler binaries or cuDLA into the
