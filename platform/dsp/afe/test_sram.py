@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise the AFE SRAM owner and patched suspend callback with mocked OS edges."""
-import importlib.util
+import hashlib
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -10,12 +11,29 @@ ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
 
 
+def patched_pcm():
+    """Replay the packaged PCM delta without a local prepared kernel tree."""
+    name = 'sound/soc/mediatek/mt8901/mt8901-afe-pcm.c'
+    heading = f'diff --git a/{name} b/{name}\n'
+    sections = re.split(r'(?=^diff --git )',
+                        (ROOT / 'kernel/1030-n1x-audio.patch').read_text(), flags=re.M)
+    prerequisite = ''.join(section for section in sections if section.startswith(heading))
+    expected = json.loads((HERE / 'base.json').read_text())['sha256'][name]
+    with tempfile.TemporaryDirectory(prefix='afe-pcm-replay-') as directory:
+        subprocess.run(['patch', '--batch', '--fuzz=0', '-p1'],
+                       input=prerequisite, text=True, cwd=directory,
+                       check=True, stdout=subprocess.PIPE)
+        path = Path(directory) / name
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+            raise ValueError('Audio prerequisite differs from the pinned PCM base')
+        subprocess.run(['git', 'apply', '--include=' + name,
+                        str(ROOT / 'kernel/p16-afe-sram.patch')],
+                       cwd=directory, check=True)
+        return path.read_text()
+
+
 def main():
-    spec = importlib.util.spec_from_file_location('afe_patch', ROOT / 'scripts/prepare-afe-sram-patch.py')
-    patch = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(patch)
-    _, sources = patch.sources(ROOT / 'kernel/src/linux-7.2.8')
-    pcm = sources['sound/soc/mediatek/mt8901/mt8901-afe-pcm.c']
+    pcm = patched_pcm()
     suspend = pcm[pcm.index('static int mt8901_afe_runtime_suspend('):
                   pcm.index('static int mt8901_afe_runtime_resume(')]
     domain = pcm[pcm.index('int mt8901_afe_sram_domain('):pcm.index('static int mt8901_afe_fe_trigger(')]
