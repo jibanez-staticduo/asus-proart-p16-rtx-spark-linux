@@ -1,35 +1,34 @@
 pkgname=n1x-adsp-dkms
-pkgver=0.1.16
+pkgver=0.1.17
 pkgrel=1
 pkgdesc='MT8901 DSP secure boot, IPC and playback services'
 arch=('aarch64')
 url='https://github.com/johannhartmann/asus-proart-p16-rtx-spark-linux'
 license=('GPL-2.0-only')
-depends=('dkms')
-optdepends=('n1x-sroot-provider-dkms: serialized SROOT upload API'
-            'n1x-adsp-firmware-local: original signed images for explicit DSP boot')
+depends=('dkms' 'n1x-sroot-provider-dkms>=0.1.0-9')
+optdepends=('n1x-adsp-firmware-local: original signed images for explicit DSP boot')
 checkdepends=('python' 'gcc')
 source=('n1x_adsp.c' 'n1x_sroot_client.h' 'n1x_sroot_firmware.h' 'Kbuild' 'dkms.conf'
         'n1x-adsp.conf' 'provenance.json' 'README.md' 'test_driver.py'
         'n1x_adsp_ipc.h' 'n1x_adsp_client.h' 'test_transport.py' 'ipc_test.c' 'protocol.md'
         'test_primary.py' 'test_lifecycle.py' 'n1x_adsp_pcm.h' 'pcm_test.c'
         'mt8901-afe-sram.h' 'test_pcm_service.py' 'test_period.py' 'test_producer.py' 'test_trigger.py'
-        'test_pm.py')
-sha256sums=('da4f0e75acb12c2aaf22b6a94c38695387efc6897609149a3bd25f12ff19f3b8'
-            'e189d3499807d5be8209bed9d441d7c125368c59043ef9d0a7aefca15afb3559'
+        'test_pm.py' 'test_device_lookup.py' 'test_provider.py')
+sha256sums=('ded5f56014410950e4269493a0e69087fc857849ec0bafe9f8ba44a5f0979e3b'
+            '9c1e58c7bc8b03645754b231163d7aadc1d04d21f7155639fd74ee96f4499bfb'
             'a1c5ae8f548dfb8224106011dc53a41885c9a18733028cac8c56c321e18d0a28'
             '4d55396218d88caa986b4d25628b494fc0ddc746aedd2d1367a7b977bdb43427'
-            'aff206b502a0b0b6c9df4a41335ae2726655522380213696c4d424db80b6b6b4'
+            '0e8c56948bdcb9fe65b1698a84af6935b2d75e903904241739bd4639f003d504'
             '30526b1d0d7132f88db4fa469587cbbb3c23557204878e80b04a5c0694208cfb'
-            'cc827bd4f079e4d10df85bda3502d7681e9c07e68c089781f448caad048b9cca'
-            '8aabd679d3362729c560fc1245109d5ab9703b8bff387f6f9f67c50496af6dbd'
-            '441c01fe06fe2c7d6069c2f6eedca875556806c28e0b67d83d61437c2beaf888'
+            '1938d8789d421e4431d587b4640ff9d7de3a4660028b183ea7ebf6a9941f50f1'
+            '50d062a6e586c62c0beb69f52ff2b1af222a7e9011bfdba52572d2de1ba84142'
+            '335a76b62dfe10770ec456410b0fcdb042531806ceda6f97edd87b2b222679b4'
             '5b5b025ab33baafb3d26734d2ba3362635b72e1f860d241237fede2543ee5ed9'
-            '5396112c2d00788e5b742ab4d9c9a286b750de50b97faf04a370386a78cdffdf'
+            'f93fbd1a505a46e59335f5d395a8f9992cba618a68ec2431b369d0b53bd386a3'
             'e9aa0dcc0da19dd325a05c645cc3e7cbf4889bfdbd585ab3e84f5ec60afb7eed'
             '4179280ce67720d36b3eb23b86159a3bac59a26e855c717f5cf7ec6081478b7a'
-            'fc8a245bb59c3604c0ec72868654f67e03ced2b365e16a753ced2f767b0ac423'
-            'ad07cfd2f8fab040e6558c2946311c3ad4be99f8a3e8dd59625249492483b71f'
+            'f0f421b13f0a29c9999d30b61d68190e8e9fa15d6b4bd74dd16fac6d2fbcd042'
+            '5ea01466df828631abebe5399071b15a6bde11ec7a70a9d11c384684ce55ccce'
             'bf9f936e7c9fbbb3467be4f241227e815f84e7d272c60507578230814aa9fdd6'
             '7f696a92fbe1cd1d45922b158a9ffd32ae89cde5c4c6578abd68a4f431ee541c'
             '433f6618cedfb6abbf7c3993d6ac36d44863848548ab5026528162f5935784c8'
@@ -38,10 +37,14 @@ sha256sums=('da4f0e75acb12c2aaf22b6a94c38695387efc6897609149a3bd25f12ff19f3b8'
             'b1660652305eb73686e0c0f3bc931f1a64f0c9f5ed61caf444c9c91d1c9c9b3d'
             '1e9c5fc77c67ab8ff60e66fc9531e0badc441d7b5bbe914a2ffaa1a0e61f8d93'
             '464d6c95f70d494136a0a660409fd87aab5a808f2fba3af43d15d28985cdec92'
-            'afda9cef373ace79e2e2030dbce483508ef3d95b6b7df982307356427ec271aa')
+            'afda9cef373ace79e2e2030dbce483508ef3d95b6b7df982307356427ec271aa'
+            '3151c1dfc7d315b58111ec34f4c49bfff392abab138ac27e286cebfdd8ab622a'
+            '4358c6e3d95908a4ef795b293b53c80e8e5013d58ce40fb2eb3421fa119cd03f')
 
 check() {
   cd "$srcdir"
+  python test_device_lookup.py
+  python test_provider.py
   python test_driver.py
   python test_pm.py
   python test_transport.py

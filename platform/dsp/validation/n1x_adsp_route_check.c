@@ -55,7 +55,7 @@ static int __init n1x_adsp_route_check_init(void)
 	unsigned int i;
 	int err;
 
-	asd = n1x_adsp_find_device("NVDA9022");
+	asd = n1x_adsp_find_device(NULL, "NVDA9022");
 	if (!asd)
 		return -ENODEV;
 	err = device_property_read_u32(asd, "acpi-asd-hw-ver", &version);

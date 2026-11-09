@@ -119,7 +119,7 @@ struct completion { bool done; };
 struct mutex { int unused; };
 struct firmware { const u8 *data;size_t size; };
 static bool enable_boot=true,privileged=true,provider=true;
-static int fault,reads,writes,pm_refs,module_refs,symbol_refs,uploads,frees,waits;
+static int fault,reads,writes,pm_refs,module_refs,provider_leases,uploads,frees,waits;
 
 static u8 firmware_bytes[631436];
 static struct firmware firmware={firmware_bytes,sizeof(firmware_bytes)};
@@ -127,8 +127,8 @@ static void *allocation;
 static u32 shared_memory[256],mailbox_memory[1024];
 static int n1x_adsp_dma_gate(struct device *d) {assert(d==&device);return fault==2?-EOPNOTSUPP:0;}
 static bool capable(int cap) {assert(cap==CAP_SYS_RAWIO);return privileged;}
-static struct device *n1x_adsp_find_device(const char *name) {
- assert(!strcmp(name,"NVDA8301"));return NULL;
+static struct device *n1x_adsp_find_device(struct device *consumer,const char *name) {
+ assert(consumer==&device && !strcmp(name,"NVDA8301"));return NULL;
 }
 static void device_lock(struct device *d) {(void)d;assert(0);}
 static void device_unlock(struct device *d) {(void)d;assert(0);}
@@ -136,7 +136,7 @@ static void *dev_get_drvdata(struct device *d) {(void)d;assert(0);return NULL;}
 static void put_device(struct device *d) {assert(!d);}
 static int request_firmware_direct(const struct firmware **fw,const char *name,struct device *d) {
  assert(d==&device && !strcmp(name,"nvidia/n1x/hifi5-0-mt8901-signed.bin"));
- assert(symbol_refs==1 && !reads && !writes);if(fault==1)return -ENOENT;*fw=&firmware;return 0;
+ assert(provider_leases==1 && !reads && !writes);if(fault==1)return -ENOENT;*fw=&firmware;return 0;
 }
 static void release_firmware(const struct firmware *fw) {assert(fw==&firmware);}
 static int dma_set_mask_and_coherent(struct device *d,u64 mask) {
@@ -156,6 +156,7 @@ static void dma_free_coherent(struct device *d,size_t bytes,void *cpu,dma_addr_t
  free(cpu);allocation=NULL;frees++;
 }
 static bool try_module_get(void *m) {assert(m==THIS_MODULE && pm_refs==1);if(fault==9)return false;module_refs++;return true;}
+static void module_put(void *m) {assert(m==THIS_MODULE && module_refs==1 && !writes);module_refs--;}
 static void dma_wmb(void) {assert(pm_refs==1 && module_refs==1 && !writes);}
 static u32 readl(const void *address) {assert(pm_refs==1);reads++;return *(const u32 *)address;}
 static void writel(u32 value,void *address) {assert(pm_refs==1 && module_refs==1);writes++;*(u32 *)address=value;}
@@ -166,7 +167,7 @@ static void reinit_completion(struct completion *c) {assert(!c->done);c->done=fa
 static unsigned long wait_for_completion_timeout(struct completion *c,unsigned long ticks) {
  assert(ticks==30000);waits++;return c->done?1:0;
 }
-static int upload_stub(u32 id,const u8 *image,size_t bytes,struct n1x_sroot_client_result_v2 *result);
+static int upload_stub(struct n1x_sroot_client *client,u32 id,const u8 *image,size_t bytes,struct n1x_sroot_client_result_v2 *result);
 static int power_calls,power_reply,in_irq;
 static u32 power_value,power_values[16];
 static int mtk_send_power_control_req(struct _power_cntrl_request *request)
@@ -179,17 +180,28 @@ static int mtk_send_power_control_req(struct _power_cntrl_request *request)
  power_value=data->customdata[1];return power_reply;
 }
 static u32 get_unaligned_le32(const u8 *p) {return (u32)p[0]|(u32)p[1]<<8|(u32)p[2]<<16|(u32)p[3]<<24;}
-static typeof(n1x_sroot_upload_dsp_v2) *get_provider(void) {if(!provider)return NULL;symbol_refs++;return upload_stub;}
-static void put_provider(void) {assert(symbol_refs==1);symbol_refs--;}
-#define symbol_get(name) get_provider()
-#define symbol_put(name) put_provider()
+static int prepare_stub(struct n1x_sroot_client *client);
+static int publish_stub(struct n1x_sroot_client *client);
+static int cancel_stub(struct n1x_sroot_client *client);
+static const struct n1x_sroot_client_ops test_sroot_ops={
+ .prepare=prepare_stub,.publish=publish_stub,.cancel=cancel_stub,.upload=upload_stub};
 ''' + state + r'''
 static struct n1x_adsp dsp;
 ''' + source[source.index('static void n1x_adsp_ipc_fail('):
              source.index('static bool n1x_adsp_tx_idle(')] + handlers + r'''
-static int upload_stub(u32 id,const u8 *image,size_t bytes,struct n1x_sroot_client_result_v2 *result) {
+static bool provider_published;
+static int prepare_stub(struct n1x_sroot_client *client)
+{assert(client==(void *)&dsp && !provider_leases && !writes && !pm_refs);
+ if(!provider)return -EHOSTDOWN;provider_leases++;return 0;}
+static int publish_stub(struct n1x_sroot_client *client)
+{assert(client==(void *)&dsp && provider_leases==1 && module_refs==1 && !writes && !provider_published);
+ if(fault==18)return -EIO;provider_published=true;return 0;}
+static int cancel_stub(struct n1x_sroot_client *client)
+{assert(client==(void *)&dsp && provider_leases==1 && !provider_published);provider_leases--;return 0;}
+static int upload_stub(struct n1x_sroot_client *client,u32 id,const u8 *image,size_t bytes,struct n1x_sroot_client_result_v2 *result) {
+ assert(client==(void *)&dsp && provider_published);
  assert(id==0xc0304 && image==firmware.data && bytes==firmware.size);
- assert(module_refs==1 && pm_refs==1 && symbol_refs==1 && dsp.published && dsp.attempted && writes==2);
+ assert(module_refs==1 && pm_refs==1 && provider_leases==1 && dsp.published && dsp.attempted && writes==2);
  assert(shared_memory[ADSP_CONFIG_OFFSET/4]==0xe0000000 && shared_memory[ADSP_CONFIG_OFFSET/4+2]==24U<<20);
  uploads++;result->published=1;if(fault==10)return -ETIMEDOUT;result->accepted=1;result->reply_valid=1;result->reply_header=0x18;result->staging_released=1;
  if(fault==13)result->published=0;if(fault==14)result->reply_valid=0;if(fault==15)result->accepted=0;
@@ -215,8 +227,9 @@ static void make_image(u8 *p,size_t bytes,u32 id)
 static void reset(void) {
  free(allocation);allocation=NULL;memset(&dsp,0,sizeof(dsp));
  memset(shared_memory,0,sizeof(shared_memory));memset(mailbox_memory,0,sizeof(mailbox_memory));
- enable_boot=privileged=provider=true;fault=reads=writes=pm_refs=module_refs=symbol_refs=uploads=frees=waits=0;
+ enable_boot=privileged=provider=true;fault=reads=writes=pm_refs=module_refs=provider_leases=uploads=frees=waits=0;
  power_calls=power_reply=in_irq=0;power_value=0;
+ provider_published=false;dsp.sroot_ops=&test_sroot_ops;dsp.sroot_client=(void *)&dsp;
  dsp.dev=&device;dsp.target=&targets[0];dsp.firmware=dsp.target->firmware;dsp.shared=shared_memory;dsp.mailbox=mailbox_memory;
  firmware.size=sizeof(firmware_bytes);make_image(firmware_bytes,firmware.size,0xc0304);
 }
@@ -239,13 +252,13 @@ static void period_callback(void *data,const struct n1x_adsp_pcm_position *posit
 int main(void) {
  reset();dsp.sleep_prepared=true;
  assert(n1x_adsp_boot(&dsp)==-EBUSY);
- assert(!reads && !writes && !pm_refs && !module_refs && !symbol_refs && !dsp.attempted);
- for(int f=1;f<=17;f++) {
+ assert(!reads && !writes && !pm_refs && !module_refs && !provider_leases && !dsp.attempted);
+ for(int f=1;f<=18;f++) {
   reset();fault=f;
   if(f==7)mailbox_memory[ADSP_OUT_STATUS/4]=1;
   if(f==8){shared_memory[ADSP_CONFIG_OFFSET/4]=0xe0000000;shared_memory[ADSP_CONFIG_OFFSET/4+2]=24U<<20;}
-  assert(n1x_adsp_boot(&dsp)<0);assert(!symbol_refs);
-  if(f<10)assert(!writes && !pm_refs && !module_refs && !dsp.published && !allocation && !uploads);
+  assert(n1x_adsp_boot(&dsp)<0);assert(provider_leases==(f>=10 && f<=17));
+  if(f<10 || f==18)assert(!writes && !pm_refs && !module_refs && !dsp.published && !allocation && !uploads);
   else {
    assert(dsp.published && dsp.attempted && pm_refs==1 && module_refs==1 && allocation && !frees && uploads==1);
    if(f<=12)assert(!dsp.boot_ready);else assert(dsp.boot_ready && dsp.error==-EPROTO && !waits);
@@ -253,13 +266,13 @@ int main(void) {
   }
  }
  reset();assert(!n1x_adsp_boot(&dsp));assert(dsp.boot_ready && dsp.loader.accepted && dsp.notifications==1);
- assert(module_refs==1 && pm_refs==1 && !symbol_refs && !frees && waits==1);
+ assert(module_refs==1 && pm_refs==1 && provider_leases==1 && !frees && waits==1);
  reset();shared_memory[ADSP_CONFIG_OFFSET/4]=0xbf0676f6;shared_memory[ADSP_CONFIG_OFFSET/4+2]=0xb6dd3e39;
  assert(!n1x_adsp_boot(&dsp) && dsp.boot_ready); /* Observed uninitialized SRAM is not a DMA window. */
  for(int guard=0;guard<6;guard++) {
   reset();if(guard==0)enable_boot=false;if(guard==1)privileged=false;if(guard==2)provider=false;
   if(guard==3)firmware_bytes[0]=0;if(guard==4)firmware.size--;if(guard==5)dsp.target=&targets[1];
-  assert(n1x_adsp_boot(&dsp)<0);assert(!reads && !writes && !pm_refs && !module_refs && !symbol_refs);
+  assert(n1x_adsp_boot(&dsp)<0);assert(!reads && !writes && !pm_refs && !module_refs && !provider_leases);
  }
  reset();assert(n1x_adsp_irq(0,&dsp)==IRQ_NONE && !reads && !writes);
  reset();assert(!n1x_adsp_boot(&dsp));power_notification(2,0x78563412);

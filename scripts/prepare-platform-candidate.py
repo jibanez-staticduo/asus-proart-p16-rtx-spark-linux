@@ -22,6 +22,7 @@ FILES = {
                'n1x_pcbi_protocol.h', 'Kbuild'),
     'scp': ('n1x_scp.c', 'Kbuild'),
     'als': ('hid-sensor-als.c', 'hid-sensor-trigger.h', 'Kbuild'),
+    'tests': ('n1x-protocol-test.c', 'Kbuild'),
     'sensorhub': ('spi-hid-core.c', 'spi-hid-acpi.c', 'spi-hid.h', 'spi-hid-core.h',
                   'spi-hid-trace.h', 'Kbuild'),
 }
@@ -111,7 +112,7 @@ def stage(args):
         'kernel_candidate': str(parent), 'kernel_tree': str(kernel),
         'kernel_release': release,
         'source_boot_id': Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
-        'loader_abi': 2, 'jobs': args.jobs, 'inputs': inputs,
+        'loader_abi': 3, 'jobs': args.jobs, 'inputs': inputs,
         'hwmon_source_commit': hwmon_head, 'hwmon_patch_sha256': digest(hwmon_patch),
         'nvidia_version': loaded_version,
         'source_commit': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
@@ -155,7 +156,10 @@ def build(output, manifest):
     verify_sources(output, manifest)
     kernel = Path(manifest['kernel_tree'])
     release = manifest['kernel_release']
-    for kind, modules in MODULES.items():
+    module_set = dict(MODULES)
+    if kernel_manifest.get('debug_profile', 'none') != 'none':
+        module_set['tests'] = ('n1x-protocol-test.ko',)
+    for kind, modules in module_set.items():
         if kind in manifest['builds']:
             for name, artifact in manifest['builds'][kind]['modules'].items():
                 path = Path(artifact['path'])
@@ -176,6 +180,8 @@ def build(output, manifest):
         else:
             command = ['make', '-C', str(kernel), 'M=' + str(directory), 'W=1',
                        '-j' + str(manifest['jobs']), 'modules']
+            if kind == 'tests':
+                command.append('CONFIG_N1X_PROTOCOL_KUNIT_TEST=m')
         with log.open('w') as stream:
             process = subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT)
             save(job_path, {'status': 'running', 'component': kind, 'pid': process.pid,

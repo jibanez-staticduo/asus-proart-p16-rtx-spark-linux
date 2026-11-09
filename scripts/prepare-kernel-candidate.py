@@ -15,6 +15,61 @@ import shlex
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
+DEBUG_COMMON = {
+    'DEBUG_KERNEL': 'y', 'PROVE_LOCKING': 'y', 'LOCKDEP': 'y',
+    'DEBUG_LOCK_ALLOC': 'y', 'DEBUG_SPINLOCK': 'y', 'DEBUG_MUTEXES': 'y',
+    'PROVE_RCU': 'y', 'DMA_API_DEBUG': 'y', 'KUNIT': 'y',
+    'KUNIT_ALL_TESTS': 'n',
+}
+
+
+def debug_settings(profile):
+    if profile == 'none':
+        return {}
+    return dict(DEBUG_COMMON, KASAN='y' if profile == 'kasan' else 'n',
+                KCSAN='y' if profile == 'kcsan' else 'n', **(
+                    {'KASAN_GENERIC': 'y', 'KASAN_OUTLINE': 'y',
+                     'KASAN_INLINE': 'n', 'KASAN_SW_TAGS': 'n', 'KASAN_HW_TAGS': 'n'}
+                    if profile == 'kasan' else {'KCSAN_STRICT': 'y'}))
+
+
+def set_config(raw, settings):
+    text = raw.decode()
+    for name, value in settings.items():
+        pattern = r'^(?:CONFIG_' + name + r'=.*|# CONFIG_' + name + r' is not set)$'
+        line = 'CONFIG_' + name + '=' + value if value != 'n' else '# CONFIG_' + name + ' is not set'
+        text, count = re.subn(pattern, line, text, flags=re.M)
+        if not count:
+            text += '\n' + line + '\n'
+    return text.encode()
+
+
+def configure_debug_inputs(inputs, settings):
+    if not settings:
+        return
+    original = inputs['kernel/config.aarch64']
+    configured = set_config(original, settings)
+    recipe = inputs['kernel/PKGBUILD'].decode()
+    # Repin only our local config. Keep all upstream signatures/checksums.
+    for algorithm, field in (('sha256', 'sha256sums_aarch64'),
+                             ('blake2b', 'b2sums_aarch64')):
+        old = hashlib.new(algorithm, original).hexdigest()
+        new = hashlib.new(algorithm, configured).hexdigest()
+        recipe, count = re.subn(r"^" + field + r"=\('" + old + r"'\)$",
+                                field + "=('" + new + "')", recipe, flags=re.M)
+        if count != 1:
+            raise RuntimeError('Original config checksum does not match ' + field)
+    inputs['kernel/config.aarch64'] = configured
+    inputs['kernel/PKGBUILD'] = recipe.encode()
+
+
+def verify_debug_config(path, settings):
+    text = path.read_text()
+    for name, value in settings.items():
+        enabled = re.search(r'^CONFIG_' + name + r'=(.+)$', text, re.M)
+        actual = enabled.group(1) if enabled else 'n'
+        if actual != value:
+            raise RuntimeError('Debug config was not retained by Kconfig: CONFIG_' + name)
 
 
 def now():
@@ -41,7 +96,7 @@ def verify_inputs(output, manifest):
             raise RuntimeError('Staged kernel input changed: ' + name)
 
 
-def prepare(output, release, jobs):
+def prepare(output, release, jobs, debug_profile='none'):
     if output.exists():
         raise RuntimeError('Output already exists; use --resume only after a terminal build')
     names = subprocess.check_output(['git', 'ls-files', 'kernel'], cwd=ROOT, text=True).splitlines()
@@ -51,6 +106,8 @@ def prepare(output, release, jobs):
         if path.is_symlink() or not path.is_file():
             raise RuntimeError('Kernel input is not a regular file: ' + name)
         inputs[name] = path.read_bytes()
+    settings = debug_settings(debug_profile)
+    configure_debug_inputs(inputs, settings)
     output.mkdir(parents=True, mode=0o700)
     for name, raw in inputs.items():
         target = output / name
@@ -62,7 +119,8 @@ def prepare(output, release, jobs):
         'local_kernel_inputs_pinned': True,
         'kernel_inputs': {name: hashlib.sha256(raw).hexdigest() for name, raw in inputs.items()},
         'pkgrel': release, 'jobs': jobs,
-        'expected_release': f'7.2.8-{release}-omarchy-p16-asus-npu-asus',
+        'expected_release': f'7.2.8-{release}-rtx-spark-npu',
+        'debug_profile': debug_profile, 'debug_config': settings,
         'source_date_epoch': subprocess.check_output(['git', 'show', '-s', '--format=%ct', 'HEAD'],
                                                       cwd=ROOT, text=True).strip(),
         'packages_installed': False, 'boot_files_written': False,
@@ -78,6 +136,7 @@ def record_packages(output, manifest, job):
     generated = (output / 'kernel/src/linux-7.2.8/include/config/kernel.release').read_text().strip()
     if actual != manifest['expected_release'] or generated != actual:
         raise RuntimeError('Built release differs from the staged candidate: ' + actual)
+    verify_debug_config(output / 'kernel/src/linux-7.2.8/.config', manifest.get('debug_config', {}))
     packages = sorted((output / 'packages').glob('*.pkg.tar.zst'))
     if len(packages) != 2:
         raise RuntimeError('Expected exactly a kernel and matching headers package')
@@ -171,8 +230,10 @@ def build(output, manifest):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
-    parser.add_argument('--release', type=int, default=27)
+    parser.add_argument('--release', type=int, default=28)
     parser.add_argument('--jobs', type=int, default=2)
+    parser.add_argument('--debug', choices=('none', 'kasan', 'kcsan'), default='none',
+                        help='separate debug candidate; preserves the installed kernel')
     parser.add_argument('--build', action='store_true')
     parser.add_argument('--resume', action='store_true')
     args = parser.parse_args()
@@ -185,7 +246,7 @@ def main():
                 raise RuntimeError('Resume requires the original candidate directory')
             manifest = json.loads((output / 'manifest.json').read_text())
         else:
-            manifest = prepare(output, args.release, args.jobs)
+            manifest = prepare(output, args.release, args.jobs, args.debug)
         with (output / 'build.lock').open('a') as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             verify_inputs(output, manifest)

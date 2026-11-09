@@ -16,7 +16,7 @@ safe suspend, device removal, firmware recovery, or support on another board.
 | Pluton | Root-only, typed PCBI metadata queries through a reference-counted miscdevice | Review the firmware/security interface and UAPI before submission. It is not a TPM implementation. Preserve the command allowlist, canonical reply checks, compat layout and removed-device checks; do not restore the raw mailbox ioctl. |
 | DSP | Signed firmware loader, IRQ/mailbox transport, typed kernel audio clients | Integrate with ASoC/SOF and the platform's firmware/power providers. Whole-core DMA quiescence and restoration are unresolved. Published instances refuse sleep in `prepare`, before any device suspend, and retain their leases until reboot. |
 | AFE SRAM/playback | Existing MediaTek ASoC frontend, checked `gen_pool` SRAM leases, deferred ALSA period work | Keep ownership in ASoC. Complete audible-stream, error, close, suspend/resume and reclamation qualification before enabling the DSP route by default. Task STOP/CLOSE is not whole-core DMA shutdown. |
-| NPU/SROOT | [Separate driver](https://github.com/johannhartmann/n1x-npu-linux), DRM compute-accelerator UAPI, component-bound DLA/SROOT endpoints | `drivers/accel`; cuDLA compatibility belongs in userspace. Convert singleton boot state to a supplier/aggregate context, review firmware dependencies and trusted-task UAPI, and establish normal remove/recovery contracts. |
+| NPU/SROOT | [Separate driver](https://github.com/johannhartmann/n1x-npu-linux), DRM compute-accelerator UAPI, component-bound DLA/SROOT endpoints | `drivers/accel`; cuDLA compatibility belongs in userspace. SROOT-owned referenced contexts and scoped DSP handles replace singleton state. Review firmware bindings and trusted-task UAPI, and establish verified whole-core release and normal remove/recovery contracts. |
 
 The aggregate `platform/Kconfig` and `platform/Kbuild` are a convenient local
 integration for builds and KUnit tests. They are not a proposal to merge all
@@ -59,8 +59,14 @@ aggregate owns a stateless DLA-to-SROOT device link for system PM and shutdown
 ordering; the component framework alone does not provide this ordering. The
 link is established before firmware publication, remains across post-publication
 failures and is explicitly removed during component unbind. Existing runtime-PM
-leases are unchanged. Upstream work still needs an independently owned supplier
-interface, per-aggregate state and DSP consumer dependency ordering. Use
+leases are unchanged. The candidate provider owns per-device contexts and ABI v3 DSP handles add
+DSP-to-DLA dependency ordering at probe. A handle reserves the provider before
+DSP DRAM allocation and commits its lease before the first DSP address write.
+Only unpublished reservations can be canceled. Lookup uses unique siblings in
+the firmware namespace because the captured AML provides no `_DEP`/`_DSD`
+association; ambiguity is an error. AFE/DSP lookups use the same scoped rule.
+This does not resolve their bidirectional SRAM/audio ownership into an upstream
+ASoC/SOF provider model, or establish whole-core shutdown. Use
 firmware-described associations where justified; do not fabricate links between
 the first globally matching ACPI devices.
 
@@ -73,7 +79,8 @@ policy is a trusted-client boundary, not isolation for hostile jobs.
 The NPU runtime/compiler and UAPI need review against DRM's open-source
 userspace requirements, including the dependency on the vendor compiler. The
 private Pluton ioctl and compound DSP diagnostic `status` sysfs file also need
-subsystem ABI review. Debugfs is suitable for diagnostics, not a required
+subsystem ABI review. Per-device debugfs files retain device references and reject detached contexts.
+Debugfs is suitable for diagnostics, not a required
 production service API. Document accepted sysfs attributes under
 `Documentation/ABI/testing` and complete UAPI comments/compat tests before
 proposing those interfaces as stable upstream contracts.
@@ -114,3 +121,6 @@ References: [submission process](https://docs.kernel.org/process/submitting-patc
 [DRM accelerator interface](https://docs.kernel.org/accel/introduction.html),
 [DRM userspace requirements](https://docs.kernel.org/gpu/drm-uapi.html#open-source-userspace-requirements)
 and [firmware compatibility](https://docs.kernel.org/driver-api/firmware/firmware-usage-guidelines.html).
+
+For candidate commands, qualification evidence and the remaining hardware
+boundary, see [driver qualification](driver-qualification.md).

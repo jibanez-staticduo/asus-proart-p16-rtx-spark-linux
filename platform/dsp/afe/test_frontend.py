@@ -109,8 +109,8 @@ static size_t mt8901_afe_sram_size(struct mtk_base_afe *a) {assert(a==&afe);retu
 static void *allocate(size_t bytes) {void *p=calloc(1,bytes);assert(p);allocations++;return p;}
 #define kzalloc_obj(x) allocate(sizeof(x))
 static void kfree(void *p) {assert(p && allocations);allocations--;free(p);}
-static struct device *n1x_adsp_find_device(const char *name)
-{assert(!strcmp(name,"NVDA8303"));if(fail==1)return NULL;device_refs++;return &dsp_dev;}
+static struct device *n1x_adsp_find_device(struct device *consumer,const char *name)
+{assert(consumer==afe.dev && !strcmp(name,"NVDA8303"));if(fail==1)return NULL;device_refs++;return &dsp_dev;}
 static void put_device(struct device *d) {assert(d==&dsp_dev && device_refs);device_refs--;}
 static void synchronize_irq(int irq) {assert(irq==77);sync_irqs++;}
 static void init_work(struct work_struct *w,void (*fn)(struct work_struct *)) {w->fn=fn;}

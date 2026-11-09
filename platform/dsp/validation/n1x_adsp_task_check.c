@@ -11,7 +11,7 @@ static int __init n1x_adsp_task_check_init(void)
 	struct device *dsp;
 	int err;
 
-	dsp = n1x_adsp_find_device("NVDA8303");
+	dsp = n1x_adsp_find_device(NULL, "NVDA8303");
 	if (!dsp)
 		return -ENODEV;
 	primary = n1x_adsp_primary_open(dsp);

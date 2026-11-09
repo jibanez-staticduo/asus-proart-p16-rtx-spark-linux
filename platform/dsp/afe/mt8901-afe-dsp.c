@@ -199,7 +199,7 @@ int mt8901_afe_dsp_startup(struct snd_pcm_substream *substream, struct snd_soc_d
 	runtime->hw.period_bytes_max = min_t(unsigned int, runtime->hw.period_bytes_max, ring_max / 2);
 	runtime->hw.info &= ~(SNDRV_PCM_INFO_PAUSE | SNDRV_PCM_INFO_RESUME |
 			      SNDRV_PCM_INFO_NO_PERIOD_WAKEUP);
-	dev = n1x_adsp_find_device("NVDA8303");
+	dev = n1x_adsp_find_device(afe->dev, "NVDA8303");
 	if (!dev) {
 		ret = -ENODEV;
 		goto free;

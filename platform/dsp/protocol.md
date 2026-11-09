@@ -501,8 +501,9 @@ does not establish that DSP operating memory can be released or that another
 core may be powered down. The v2 API separates consumed image staging from the retained DSP lifetime
 lease.
 
-The DSP driver uses `n1x_sroot_upload_dsp_v2()`. The provider shares v1's
-boot mutex, container checks and one-attempt policy, and retains its module/runtime-PM
+The DSP driver uses the device-bound `n1x_sroot_client_ops_v3()` handle.
+Its upload operation preserves ABI v2 staging semantics. The provider uses
+the selected SROOT context mutex, container checks and one-attempt policy, and retains its module/runtime-PM
 reference before publication. It releases the temporary image buffer only when
 the serialized exchange completes with command `0x18`, raw reply header exactly
 `0x18`, zero payload words, and zero status/detail. It then clears the CPU/DMA
@@ -511,8 +512,8 @@ NPU shutdown still checks it before changing hardware or lifetime state.
 
 Every rejected, malformed or uncertain exchange retains staging and poisons
 the shared loader. A later v1/v2 call cannot retry or retire an old allocation.
-ABI v1 retains its original behavior. The DSP client requires v2 before taking
-power or publishing operating memory, and rejects inconsistent success fields
+ABI v1 retains its original behavior. The DSP client acquires ABI v3 at probe and reserves the provider before taking
+power. It commits the lease before publishing operating memory, and rejects inconsistent success fields
 even if a ready notification has arrived. No operating DSP DRAM or AFE SRAM,
 provider lease, module reference or runtime-PM vote is released by this API.
 

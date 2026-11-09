@@ -111,6 +111,8 @@ struct n1x_adsp {
 	void (*primary_period)(void *data, const struct n1x_adsp_pcm_position *position, int error);
 	void *primary_period_data;
 	struct n1x_sroot_client_result_v2 loader;
+	const struct n1x_sroot_client_ops *sroot_ops;
+	struct n1x_sroot_client *sroot_client;
 	struct work_struct power_work;
 	spinlock_t power_lock;
 	DECLARE_KFIFO(power_requests, u32, 16);
@@ -388,7 +390,6 @@ static irqreturn_t n1x_adsp_irq(int irq, void *data)
 
 static int n1x_adsp_boot(struct n1x_adsp *dsp)
 {
-	typeof(n1x_sroot_upload_dsp_v2) *upload;
 	const struct firmware *firmware;
 	u64 end;
 	u32 pending, previous_dma, previous_bytes;
@@ -404,7 +405,7 @@ static int n1x_adsp_boot(struct n1x_adsp *dsp)
 	 * primary core to complete boot first.
 	 */
 	if (dsp->target->image_id == 0xc0305) {
-		struct device *primary = n1x_adsp_find_device("NVDA8301");
+		struct device *primary = n1x_adsp_find_device(dsp->dev, "NVDA8301");
 		struct n1x_adsp *first = NULL;
 		bool ready;
 
@@ -420,13 +421,15 @@ static int n1x_adsp_boot(struct n1x_adsp *dsp)
 		if (!ready)
 			return -EHOSTDOWN;
 	}
-	/* Resolve the serialized loader before taking power or publishing DMA. */
-	upload = symbol_get(n1x_sroot_upload_dsp_v2);
-	if (!upload)
-		return -EOPNOTSUPP;
+	/* Reserve the specific provider before taking power or publishing DMA.
+	 * Probe has already established the dependency and held its interface.
+	 */
+	err = dsp->sroot_ops->prepare(dsp->sroot_client);
+	if (err)
+		return err;
 	err = request_firmware_direct(&firmware, dsp->firmware, dsp->dev);
 	if (err)
-		goto put_symbol;
+		goto cancel_provider;
 	err = n1x_sroot_validate_image(firmware->data, firmware->size, dsp->target->image_id);
 	if (err)
 		goto release;
@@ -469,6 +472,11 @@ static int n1x_adsp_boot(struct n1x_adsp *dsp)
 		err = -ENODEV;
 		goto free;
 	}
+	err = dsp->sroot_ops->publish(dsp->sroot_client);
+	if (err) {
+		module_put(THIS_MODULE);
+		goto free;
+	}
 	reinit_completion(&dsp->ready);
 	dma_wmb();
 	/* From this point no failure may free DMA or power down this DSP. */
@@ -476,7 +484,8 @@ static int n1x_adsp_boot(struct n1x_adsp *dsp)
 	WRITE_ONCE(dsp->published, true);
 	writel(lower_32_bits(dsp->dma), dsp->shared + ADSP_CONFIG_OFFSET);
 	writel(dsp->target->dram_bytes, dsp->shared + ADSP_CONFIG_OFFSET + 8);
-	err = upload(dsp->target->image_id, firmware->data, firmware->size, &dsp->loader);
+	err = dsp->sroot_ops->upload(dsp->sroot_client, dsp->target->image_id,
+				    firmware->data, firmware->size, &dsp->loader);
 	if (!err && (!dsp->loader.published || !dsp->loader.reply_valid ||
 		     !dsp->loader.accepted || !dsp->loader.staging_released ||
 		     dsp->loader.reply_header != 0x18))
@@ -496,8 +505,9 @@ put_pm:
 	pm_runtime_put(dsp->dev);
 release:
 	release_firmware(firmware);
-put_symbol:
-	symbol_put(n1x_sroot_upload_dsp_v2);
+cancel_provider:
+	if (!dsp->published)
+		dsp->sroot_ops->cancel(dsp->sroot_client);
 	return err;
 }
 
@@ -529,7 +539,7 @@ static int n1x_adsp_primary_route(struct n1x_adsp *dsp)
 	unsigned int i;
 	int err;
 
-	asd = n1x_adsp_find_device("NVDA9022");
+	asd = n1x_adsp_find_device(dsp->dev, "NVDA9022");
 	if (!asd)
 		return -ENODEV;
 	err = device_property_read_u32(asd, "acpi-asd-hw-ver", &version);
@@ -716,6 +726,33 @@ static struct attribute *n1x_adsp_attrs[] = {
 };
 ATTRIBUTE_GROUPS(n1x_adsp);
 
+static void n1x_adsp_put_provider(void *data)
+{
+	struct n1x_adsp *dsp = data;
+
+	/* Published handles deliberately retain their provider lifetime. */
+	dsp->sroot_ops->put(dsp->sroot_client);
+	symbol_put(n1x_sroot_client_ops_v3);
+}
+
+static int n1x_adsp_get_provider(struct n1x_adsp *dsp)
+{
+	typeof(n1x_sroot_client_ops_v3) *get_ops;
+
+	get_ops = symbol_get(n1x_sroot_client_ops_v3);
+	if (!get_ops)
+		return -EPROBE_DEFER;
+	dsp->sroot_ops = get_ops();
+	dsp->sroot_client = dsp->sroot_ops->get(dsp->dev);
+	if (IS_ERR(dsp->sroot_client)) {
+		int err = PTR_ERR(dsp->sroot_client);
+
+		symbol_put(n1x_sroot_client_ops_v3);
+		return err;
+	}
+	return devm_add_action_or_reset(dsp->dev, n1x_adsp_put_provider, dsp);
+}
+
 static int n1x_adsp_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -746,6 +783,9 @@ static int n1x_adsp_probe(struct platform_device *pdev)
 	dsp->dev = dev;
 	dsp->target = &targets[i];
 	dsp->firmware = dsp->target->firmware;
+	err = n1x_adsp_get_provider(dsp);
+	if (err)
+		return dev_err_probe(dev, err, "no unique ready SROOT provider\n");
 	device_property_read_string(dev, "firmware-name", &dsp->firmware);
 	mutex_init(&dsp->lock);
 	init_completion(&dsp->ready);

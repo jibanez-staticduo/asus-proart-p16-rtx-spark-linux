@@ -57,9 +57,9 @@ static void *dev_get_drvdata(struct device *dev) {assert(dev==&device);return de
 static int mutex_lock_interruptible(struct mutex *lock)
 {(void)lock;if(lock_error)return lock_error;assert(!request_locks++);return 0;}
 static void mutex_unlock(struct mutex *lock) {(void)lock;assert(request_locks--==1);}
-static struct device *n1x_adsp_find_device(const char *name)
+static struct device *n1x_adsp_find_device(struct device *consumer,const char *name)
 {
- assert(!strcmp(name,"NVDA9022"));
+ assert(consumer==&device && !strcmp(name,"NVDA9022"));
  if(missing_asd)return NULL;asd_refs++;return &asd;
 }
 static void put_device(struct device *dev) {assert(dev==&asd && asd_refs--==1 && !node_refs);}

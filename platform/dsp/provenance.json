@@ -35,7 +35,7 @@
   },
   "shared_loader": {
     "owner": "n1x_npu_bootstrap / NVDA8600",
-    "kernel_api": "n1x_sroot_upload_dsp_v2",
+    "kernel_api": "n1x_sroot_client_ops_v3",
     "header": "n1x_sroot_client.h",
     "implementation": "../../../n1x-lab/npu/driver/n1x_npu_boot_linux.c",
     "serialized_with_npu_boot": true,
@@ -44,7 +44,9 @@
     "provider_lifetime": "Published lease and PM/module references retained independently of staging",
     "successful_staging_release": "Only completed exchange with canonical empty raw reply header 0x18 and zero remote status/detail",
     "operating_memory_or_provider_lease_release_implemented": false,
-    "signed_container_bounds_checked": true
+    "signed_container_bounds_checked": true,
+    "device_binding": "Unique shared firmware parent; referenced context and DSP -> DLA -> SROOT system-PM links",
+    "reservation": "Reserve before DRAM allocation; irrevocable publish before first DSP DMA address write"
   },
   "scope": {
     "auto_boot": false,
@@ -426,7 +428,7 @@
     ]
   },
   "loader_staging_release": {
-    "client_api": "n1x_sroot_upload_dsp_v2",
+    "client_api": "n1x_sroot_client_ops_v3 (v2 staging semantics)",
     "provider_package": "n1x-sroot-provider-dkms",
     "analysis_script": "scripts/analyze-dsp-shutdown.py",
     "native_loader_sha256": "f814e861b5e076aa4e00619a8a588df3c4ae9ec2b5026c30748ba493ce0e6d8a",
@@ -436,7 +438,7 @@
     "canonical_reply": "raw header 0x18, command 0x18, count/status/detail zero",
     "error_policy": "Retain staging and poison the shared loader after malformed, rejected or uncertain submission",
     "provider_shutdown_guard": "Published DSP lease remains set even with cpu=NULL and dma=0; NPU shutdown returns EBUSY before changing hardware",
-    "dsp_preflight": "Require v2 symbol before power/DRAM publication; validate all returned success fields before waiting for ready",
+    "dsp_preflight": "Acquire scoped provider at probe; reserve before power/DRAM and publish lease before DSP DMA writes; validate all upload success fields before waiting for ready",
     "whole_core_release_verified": false
   }
 }

@@ -1,0 +1,82 @@
+# Driver candidate qualification
+
+The installed kernel and experimental DSP instances must remain available
+until a matching candidate has passed its own fresh-boot tests. A build or
+portable sanitizer test is not hardware qualification. Never force-unload a
+published DSP or drop its DMA/provider references to obtain a passing test.
+
+## Recorded baseline
+
+On 2026-11-09, kernel `7.2.8-23-rtx-spark-npu` and the installed NPU module
+(srcversion `AA4C27A61D0319E02A71961`) produced 16 correct cuDLA numerical
+outputs, including five job-reuse submissions. The overlapping kernel-log
+window contained no new relevant driver faults. All three DSPs reported
+published firmware, accepted upload, readiness and error zero. The power
+profile remained unchanged. These results qualify only that running baseline,
+not the new context/client code.
+
+## Reproducible candidates
+
+The device-bound DSP candidate requires NPU provider source
+[`8137ccc`](https://github.com/johannhartmann/n1x-npu-linux/commit/8137cccb515eb15bd23e4bb10689334cd4df771f)
+or a descendant containing ABI v3. Use that checkout for the sibling NPU tree.
+First run the offline suites and pin the matching provider snapshot:
+
+```sh
+bash scripts/check-kernel-drivers.sh
+make -C ../n1x-lab/npu check PYTHON=python3
+python3 scripts/prepare-sroot-provider.py
+```
+
+Stage separate debug kernels. The commands below do not install packages,
+change running drivers, write boot entries or alter the power profile:
+
+```sh
+python3 scripts/prepare-kernel-candidate.py \
+  --output build/context-kasan --release 29 --debug kasan --jobs 8 --build
+python3 scripts/prepare-platform-candidate.py \
+  --kernel-candidate build/context-kasan --output build/context-kasan-modules \
+  --hwmon-source build/spark_hwmon --nvidia-source /path/to/matching/nvidia-source \
+  --jobs 8
+```
+
+Use a different output directory and release for `--debug kcsan` (for example,
+release 30). KASAN and KCSAN are separate kernel configurations. Both enable
+lockdep, DMA-API debugging and KUnit. Completed builds check that Kconfig kept
+the required options. The module builder also produces the native protocol
+KUnit module for debug candidates and checks kernel/module identities. Build
+manifests pin every input and output; do not substitute a module from another
+kernel or a later checkout. Use the existing `--resume --build` path only for
+the original unchanged candidate.
+
+Install a completed, verified candidate as a separate boot option, preserving
+the working default, recovery entry and menu timeout. A fresh boot is required
+while the installed DSPs retain published memory. Do not test a candidate
+against the old already-loaded modules.
+
+## Hardware sequence
+
+1. Verify kernel release, module srcversions, boot ID and KASAN/KCSAN/lockdep/
+   DMA-debug configuration against the manifests. Collect kernel logs from
+   before the first test and pstore records after any unexpected reboot.
+2. Run the native KUnit module. With DSP firmware unpublished, verify audio
+   playback/capture, idle/active NPU jobs and repeated system sleep/resume.
+   Record missing devices and all kernel warnings as failures.
+3. Run the cuDLA qualifier against the exact candidate module artifact,
+   including reuse, numerical outputs and retained-allocation counters.
+4. With unpublished DSP clients removed, qualify checked NPU stop/reload and
+   numerical execution again. Reject mismatched source versions or retained
+   module/firmware leases; do not reset or force unload after a failure.
+5. Explicitly boot DSP firmware using the matching ABI v3 bundle. Confirm all
+   three ready replies, staging-release fields and provider links. Exercise
+   the opt-in AFE route with real playback/capture and close/error cases.
+6. Repeated sleep requests after DSP publication must abort in PM `prepare`
+   without losing audio devices or changing published DMA state. This verifies
+   the guard, **not** DSP suspend/resume. Whole-core DMA quiescence, provider
+   lease release, firmware restart and normal published-device removal remain
+   unimplemented and must not be reported as passed.
+
+Injected transport faults and allocation failures run in the hardware-free
+actual-function harnesses. Do not manufacture mailbox errors or power faults
+on a live published instance. AFE task STOP/CLOSE and IRQ disable are not
+proof of whole-DSP DMA quiescence.

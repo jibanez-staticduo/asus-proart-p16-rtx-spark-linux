@@ -34,8 +34,8 @@ static struct n1x_adsp_primary primary;
 static unsigned calls,refs;
 static int open_error,close_error;
 static bool missing;
-static struct device *n1x_adsp_find_device(const char *name)
-{assert(!strcmp(name,"NVDA8303"));
+static struct device *n1x_adsp_find_device(struct device *consumer,const char *name)
+{assert(!consumer && !strcmp(name,"NVDA8303"));
  if(missing)return NULL;refs++;return &device;}
 static void put_device(struct device *dev) {assert(dev==&device && refs--==1);}
 struct n1x_adsp_primary *n1x_adsp_primary_open(struct device *dev)

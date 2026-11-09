@@ -13,17 +13,37 @@ struct mt8901_afe_sram_buffer;
 #include <linux/acpi.h>
 #include <linux/platform_device.h>
 
-/* Returns a referenced platform device, independent of ACPI instance names. */
-static inline struct device *n1x_adsp_find_device(const char *hid)
+/* Referenced unique sibling in the consumer's firmware scope. NULL consumer
+ * is reserved for standalone validation modules and requires global uniqueness.
+ * Never pick the first device when firmware associations are ambiguous.
+ */
+static inline struct device *n1x_adsp_find_device(struct device *consumer, const char *hid)
 {
-	struct acpi_device *adev;
+	struct acpi_device *adev = NULL, *found = NULL;
+	struct acpi_device *parent = NULL;
 	struct device *dev;
 
-	adev = acpi_dev_get_first_match_dev(hid, NULL, -1);
-	if (!adev)
+	if (consumer) {
+		if (!ACPI_COMPANION(consumer))
+			return NULL;
+		parent = acpi_dev_parent(ACPI_COMPANION(consumer));
+		if (!parent)
+			return NULL;
+	}
+	while ((adev = acpi_dev_get_next_match_dev(adev, hid, NULL, -1))) {
+		if (consumer && acpi_dev_parent(adev) != parent)
+			continue;
+		if (found) {
+			acpi_dev_put(found);
+			acpi_dev_put(adev);
+			return NULL;
+		}
+		found = acpi_dev_get(adev);
+	}
+	if (!found)
 		return NULL;
-	dev = bus_find_device_by_acpi_dev(&platform_bus_type, adev);
-	acpi_dev_put(adev);
+	dev = bus_find_device_by_acpi_dev(&platform_bus_type, found);
+	acpi_dev_put(found);
 	return dev;
 }
 #endif

@@ -20,7 +20,9 @@ host-system matching rules.
 
 DSP publication retains operating DRAM, AFE SRAM and module/runtime-PM
 references. A task ACK, STOP or IRQ disable does not prove whole-core DMA
-quiescence. SROOT client ABI v2 may release a consumed temporary image buffer
+quiescence. Device-bound ABI v3 clients reserve the selected provider before
+DSP publication and add PM dependency ordering. Their v2-compatible upload
+may release a consumed temporary image buffer
 after a canonical successful upload; that does not release the DSP lifetime
 lease. Failed or uncertain uploads retain staging and poison further requests.
 

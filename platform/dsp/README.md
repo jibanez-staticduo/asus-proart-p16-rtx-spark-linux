@@ -39,8 +39,18 @@ offline tests alone do not establish that hardware result.
 
 ## Secure loading and IPC
 
-The driver requires SROOT client ABI v2 before taking power or publishing
-operating memory. SROOT authenticates signed images; the host validates their
+The driver acquires SROOT client ABI v3 during probe. Its referenced handle
+selects a unique provider under the same firmware parent and establishes
+DSP → DLA → SROOT ordering for system PM. Missing providers defer probe;
+ambiguous associations fail closed. The current firmware has no `_DEP` or
+`_DSD` association for these devices, so sibling uniqueness is a platform
+fallback, not a binding for arbitrary future boards.
+
+Before taking power or allocating DRAM, boot reserves that provider. Before
+the first DSP DMA address write it makes the reservation permanent. Failures
+before publication cancel the reservation; published instances retain it even
+if the later image upload fails. Successful staging release uses ABI v2's
+canonical-reply rules. SROOT authenticates signed images; the host validates their
 container structure and bounds. A canonical completed upload may release its
 temporary image staging, independently of the retained DSP lifetime lease.
 Malformed or uncertain uploads retain staging and block further submissions.
