@@ -1,0 +1,186 @@
+--- a/spbm.c
++++ b/spbm.c
+@@ -36,6 +36,7 @@
+ #include <linux/uuid.h>
+ #include <linux/units.h>
+ #include <linux/dmi.h>
++#include <linux/platform_device.h>
+ #include <linux/mutex.h>
+ 
+ #define DRIVER_NAME	"spbm"
+@@ -503,14 +504,14 @@
+ }
+ 
+ #include "n1x-acpi.h"
+-
+-/* Only power-unit interpretation needs a validated firmware quirk. */
++#include "n1x-probe-policy.h"
++
++/* Power units are interpreted only for this exact ASUS P16 model. */
+ static const struct dmi_system_id n1x_power_units[] = {
+ 	{
+ 		.matches = {
+ 			DMI_EXACT_MATCH(DMI_SYS_VENDOR, "ASUS"),
+ 			DMI_EXACT_MATCH(DMI_PRODUCT_NAME, "ProArt P16 H7607BA"),
+-			DMI_EXACT_MATCH(DMI_BIOS_VERSION, "H7607BA.300"),
+ 		},
+ 	},
+ 	{ }
+@@ -642,11 +643,11 @@
+ };
+ 
+ 
+-static int n1x_add(struct acpi_device *adev)
+-{
+-	struct device *dev = &adev->dev, *hwdev;
++static int n1x_add(struct device *dev, struct acpi_device *adev)
++{
++	struct device *hwdev;
+ 	struct n1x_priv *p;
+-	int i, power = 0, temp = 0;
++	int i, power = 0, temp = 0, mmio_ret = -ENODEV;
+ 	bool power_units_known = dmi_check_system(n1x_power_units);
+ 
+ 	if (!n1x_supported_schema(adev->handle))
+@@ -664,14 +665,13 @@
+ 		if (p->temp[i])
+ 			temp++;
+ 	}
+-	if (!power && !temp)
+-		return dev_err_probe(dev, -ENODEV, "no supported RTX Spark sensors found\n");
+ 	mutex_init(&p->lock);
+-	if (power_units_known) {
+-		i = n1x_mmio_init(dev, p, adev->handle);
+-		if (i)
+-			return i;
+-	}
++	if (power_units_known)
++		mmio_ret = n1x_mmio_init(dev, p, adev->handle);
++	if (!n1x_probe_has_supported_sensors(power_units_known, power > 0,
++					     temp > 0, !mmio_ret))
++		return dev_err_probe(dev, mmio_ret ? mmio_ret : -ENODEV,
++				     "no supported RTX Spark sensors found\n");
+ 	hwdev = devm_hwmon_device_register_with_info(dev, "spbm_n1x", p, &n1x_chip,
+ 						 p->base ? n1x_raw_groups : NULL);
+ 	if (IS_ERR(hwdev))
+@@ -683,9 +683,10 @@
+ 
+ /* ACPI driver */
+ 
+-static int spbm_add(struct acpi_device *adev)
+-{
+-	struct device *dev = &adev->dev;
++static int spbm_probe(struct platform_device *pdev)
++{
++	struct acpi_device *adev = ACPI_COMPANION(&pdev->dev);
++	struct device *dev = &pdev->dev;
+ 	struct list_head res_list;
+ 	struct resource_entry *re;
+ 	resource_size_t phys = 0;
+@@ -693,8 +694,11 @@
+ 	struct device *hwdev;
+ 	int spbm_idx, idx = 0, ret, resolved, i, j;
+ 
++	if (!adev)
++		return -ENODEV;
++
+ 	if (!strcmp(acpi_device_hid(adev), "NVDA8810"))
+-		return n1x_add(adev);
++		return n1x_add(dev, adev);
+ 
+ 	p = devm_kzalloc(dev, sizeof(*p), GFP_KERNEL);
+ 	if (!p)
+@@ -876,14 +880,14 @@
+ };
+ MODULE_DEVICE_TABLE(acpi, spbm_acpi_ids);
+ 
+-static struct acpi_driver spbm_driver = {
+-	.name = DRIVER_NAME,
+-	.ids = spbm_acpi_ids,
+-	.ops = {
+-		.add = spbm_add,
++static struct platform_driver spbm_driver = {
++	.probe = spbm_probe,
++	.driver = {
++		.name = DRIVER_NAME,
++		.acpi_match_table = spbm_acpi_ids,
+ 	},
+ };
+-module_acpi_driver(spbm_driver);
++module_platform_driver(spbm_driver);
+ 
+ MODULE_LICENSE("GPL");
+ MODULE_VERSION("0.3.0.rtxspark.5");
+--- a/n1x-mmio.h
++++ b/n1x-mmio.h
+@@ -2,7 +2,7 @@
+ #ifndef SPBM_N1X_MMIO_H
+ #define SPBM_N1X_MMIO_H
+ 
+-/* P16 H7607BA.300 only: Windows tables and local load/cap validation. */
++/* P16 H7607BA model: firmware fields validated before MMIO registration. */
+ #define N1X_FIRST_LIMIT 9
+ #define N1X_LIMIT_CONFIG (HWMON_P_INPUT | HWMON_P_LABEL | HWMON_P_CAP | HWMON_P_MIN | HWMON_P_MAX)
+ static const struct {
+@@ -183,27 +183,32 @@
+ static int n1x_mmio_init(struct device *dev, struct n1x_priv *p, acpi_handle handle)
+ {
+ 	unsigned long long platform;
++	void __iomem *base;
+ 	u32 low, high, ec, effective;
+-	int i;
+-
+-	/* Caller has checked exact model/BIOS and the recognized MTEL schema. */
++	int i, ret;
++
++	/* Caller has checked the exact model and recognized MTEL schema. */
+ 	if (ACPI_FAILURE(acpi_evaluate_integer(handle, "PLID", NULL, &platform)) ||
+ 	    platform != 2)
+ 		return dev_err_probe(dev, -ENODEV, "unvalidated N1X platform ID\n");
+-	p->base = devm_ioremap(dev, 0x1c238000, SPBM_SIZE);
+-	if (!p->base)
++	base = devm_ioremap(dev, 0x1c238000, SPBM_SIZE);
++	if (!base)
+ 		return -ENOMEM;
+ 	for (i = 0; i < ARRAY_SIZE(n1x_limit_slots); i++) {
+-		low = ioread32(p->base + n1x_limit_bounds[i]);
+-		high = ioread32(p->base + n1x_limit_bounds[i] + 4);
+-		ec = ioread32(p->base + 0x120 + n1x_limit_slots[i] * 4);
+-		effective = ioread32(p->base + 0x160 + n1x_limit_slots[i] * 4);
++		low = ioread32(base + n1x_limit_bounds[i]);
++		high = ioread32(base + n1x_limit_bounds[i] + 4);
++		ec = ioread32(base + 0x120 + n1x_limit_slots[i] * 4);
++		effective = ioread32(base + 0x160 + n1x_limit_slots[i] * 4);
+ 		if (!low || low > high || high > 250000 || ec < low || ec > high ||
+ 		    effective < low || effective > high)
+ 			return dev_err_probe(dev, -ENODEV, "invalid N1X limit contract\n");
+ 	}
+-	if (ioread32(p->base + 0x818) < 2000 || ioread32(p->base + 0x818) > 4500)
++	if (ioread32(base + 0x818) < 2000 || ioread32(base + 0x818) > 4500)
+ 		return dev_err_probe(dev, -ENODEV, "invalid N1X temperature contract\n");
+-	return devm_add_action_or_reset(dev, n1x_reset_owned, p);
++	p->base = base;
++	ret = devm_add_action_or_reset(dev, n1x_reset_owned, p);
++	if (ret)
++		p->base = NULL;
++	return ret;
+ }
+ #endif
+--- /dev/null
++++ b/n1x-probe-policy.h
+@@ -0,0 +1,15 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++#ifndef SPBM_N1X_PROBE_POLICY_H
++#define SPBM_N1X_PROBE_POLICY_H
++
++#include <linux/types.h>
++
++static inline bool n1x_probe_has_supported_sensors(bool p16_model,
++						   bool acpi_power,
++						   bool acpi_temp,
++						   bool validated_mmio)
++{
++	return acpi_power || acpi_temp || (p16_model && validated_mmio);
++}
++
++#endif

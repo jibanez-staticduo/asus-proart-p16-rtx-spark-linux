@@ -1,7 +1,7 @@
-# ASUS ProArt P16 on Linux
+# Linux support for the ASUS ProArt P16 RTX Spark
 
 Kernel packages, ACPI preparation and platform drivers for the ARM64 ASUS
-ProArt P16 H7607BA. Board configuration targets BIOS H7607BA.300. The kernel
+ProArt P16 H7607BA with NVIDIA N1X/RTX Spark. Board configuration targets BIOS H7607BA.300. The kernel
 modules match ACPI devices and firmware interfaces; they do not use ASUS
 product-name or BIOS checks.
 
@@ -22,6 +22,21 @@ See [driver status](docs/platform-driver-status.md),
 [upstream requirements](docs/upstream-readiness.md) for scope and limitations.
 The [GPU power measurements](docs/gpu-power.md) cover the bounded SysPL3
 experiment and its qualification limits.
+
+## Linux 7.3 hardware improvements (BIOS 303)
+
+A separate [hardware patch guide](improvements/README.md) provides an ordered
+Linux 7.3 series with N1X prerequisites, coordinated s2idle and LPS0 timing,
+ASUS WMI, battery controls, SPI-HID/light-sensor fixes and the upstream MT7925
+MLO correction. It also includes speaker routing, an open PipeWire graph,
+telemetry and source regression tests.
+
+This is an alternative source-patch path for maintainers and other Linux
+distributions. Follow its component guides separately from the pinned
+BIOS 300/Linux 7.2.8 package procedure below. The BIOS 303 validation did not
+use a DSDT override. Read the [physical results and limits](improvements/VALIDATION.md):
+18-CPU admission is tentative, and the neutral public audio graph still
+requires runtime and physical listening validation.
 
 ## Build
 
@@ -104,6 +119,8 @@ Input versions and hashes are recorded in `sources.json`,
 unknowns. Python is used for input preparation, offline tests and diagnostics;
 firmware transport, memory ownership and playback callbacks run in C drivers.
 
+The board enablement builds on
+[Josephine Pfeiffer's Arch Linux ARM ProArt P16 work](https://github.com/pfeifferj/archlinuxarm-proart-p16).
 See [LICENSES.md](LICENSES.md) for source and OEM asset terms. Contributor
 attribution, license headers and existing patch sign-offs are preserved.
 
