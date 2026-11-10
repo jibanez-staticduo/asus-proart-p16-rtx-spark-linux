@@ -1,6 +1,7 @@
 # Hardware validation and remaining work
 
-These observations are from an ASUS ProArt P16 H7607BA, N1X ARM64, BIOS 303.
+The initial observations below are from an ASUS ProArt P16 H7607BA, N1X ARM64,
+BIOS 303. A separate BIOS 305 record follows.
 They describe what was tested, not certification of every distro or BIOS.
 
 | Area | Evidence | Limits |
@@ -56,7 +57,7 @@ These observations do not establish that all MT7925 problems are fixed.
 
 The compact export remains a separate source-tested patch combination, not a
 claim of a full standalone build or physical qualification of every feature.
-Only the H7607BA BIOS 303 20-CPU configuration has been physically tested here;
+Only the H7607BA BIOS 303/305 20-CPU configurations have been physically tested here;
 18-CPU N1X admission is tentative and depends on the same structural firmware
 checks; no 18-CPU physical boot, suspend, resume or power result is available.
 
