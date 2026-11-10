@@ -113,3 +113,30 @@ actual IOMMU mmap, local-input rejection, SCP snapshots, typed Pluton fault/
 concurrency and protocol tests run without hardware. Audit PE/CPIO CLI fixtures
 and the UPower D-Bus fixture checks also pass. These checks do not compile a new
 full kernel or replace the physical qualification limitations above.
+
+## BIOS 305 validation (2026-11-10)
+
+On the same 20-CPU H7607BA with BIOS H7607BA.305, experimental kernel
+`7.3.0-44.10` admitted all 20 CPUs, three parent levels and seven compositions,
+without the previous `-22` rejection. One manual lid cycle lasted 6 min
+34.688 s. Battery discharge was 0.209 Wh over a 400.983 s measurement interval,
+about 1.876 W including transitions and 6.295 s awake. The suspend success
+counter increased by one and the failure counter remained zero; NVIDIA,
+Wi-Fi and the ambient light sensor recovered.
+
+The main `7.3.0-44.10` kernel subsequently booted with coordinated admission
+and no failed services. A suspend-power test on that main boot was not run.
+These are tests of the integrated distro kernels, not a separate full build
+or hardware qualification of this compact standalone export. The BIOS 303
+results above remain valid for their original kernels and test conditions.
+
+Patch 1126 retains the validated candidate bytes while using the next free
+series number. It accepts the known enabled parent descriptors and exact
+paired system timing sentinel without changing firmware timing values.
+The policy harness extracts the actual admission functions; the governor
+harness extracts `cpu_system_power_down_ok` and checks unconstrained QoS,
+finite QoS rejection and disabled states against that sentinel.
+
+One cycle and battery-gauge energy do not prove physical DRIPS residency or
+a steady-state power rate. No 18-CPU hardware was tested. RTC timed wake
+remains unvalidated; this change does not claim an RTC wake fix.

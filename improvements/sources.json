@@ -26,7 +26,7 @@
       ],
       "adaptation": "Consolidated Linux7.3 port, P16 automatic firmware admission and suspend-only policy; not a new upstream sign-off"
     },
-    "patch_count": 90,
+    "patch_count": 91,
     "adaptation_note": "The exported subset omits unrelated scheduler, x86 and Qualcomm changes from the reference distro. The coordinated follow-up tentatively admits 18 or 20 present CPUs while retaining the existing complete-coverage and firmware hierarchy contracts; only the 20-CPU P16 is physically validated. Use olddefconfig; no full rebuild of this compact subset is claimed.",
     "followups": [
       {
@@ -105,7 +105,10 @@
   },
   "validation": {
     "physical_hardware": "ASUS ProArt P16 H7607BA NVIDIA N1X AArch64",
-    "bios": "H7607BA.303",
+    "bios": [
+      "H7607BA.303",
+      "H7607BA.305"
+    ],
     "record": "VALIDATION.md",
     "export": "Kernel series clean-applied and source harnesses tested; no separate full build of compact vanilla series claimed"
   },
