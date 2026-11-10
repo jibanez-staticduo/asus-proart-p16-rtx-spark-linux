@@ -106,8 +106,8 @@
       },
       {
         "file": "kernel/test_bios305_governor.py",
-        "change": "Extract actual system governor; preserve sentinel under unconstrained QoS and reject finite QoS or disabled states",
-        "sha256": "9ce65fcdb56c99c47edaf0b162fe3c91de0c23e79811e3b01638beef94747efc"
+        "change": "Extract actual system governor and kernel pm_qos/limits constant definitions; test S32_MAX no-constraint sentinel, finite QoS, disabled states and rejection of a mutant without the no-constraint exception",
+        "sha256": "1b8c40e6859dd928b63345aee239ee81894539ef7cd5f82122cd2421f467782e"
       },
       {
         "file": "kernel/1127-acpi-n1x-saturate-drips-fallback-latency.patch",
