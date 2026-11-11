@@ -15,7 +15,9 @@ patch -p1 --fuzz=0 < "$export_dir/pluton/0001-manual-neutral-diagnostics.patch"
 make -C /path/to/kernel/build M="$PWD/platform/scp" W=1 modules
 make -C /path/to/kernel/build M="$PWD/platform/pluton" W=1 modules
 N1X_DIAGNOSTIC_SOURCE="$PWD/platform/scp" python3 "$export_dir/scp/test_snapshot.py"
+N1X_DIAGNOSTIC_SOURCE="$PWD/platform/scp" python3 "$export_dir/scp/test_mailbox.py"
 N1X_DIAGNOSTIC_SOURCE="$PWD/platform/pluton" python3 "$export_dir/pluton/test_query.py"
+N1X_DIAGNOSTIC_SOURCE="$PWD/platform/pluton" python3 "$export_dir/pluton/test_wait.py"
 cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined -g \
   platform/pluton/protocol_test.c -o /tmp/n1x-pluton-protocol
 /tmp/n1x-pluton-protocol
@@ -31,6 +33,9 @@ SCP matches NVDA8200 and validates resources/firmware dispatch ABI. Passive
 `modprobe n1x_scp` provides root-readable debugfs status/log snapshots. Explicit
 `enable_mailbox=1` permits bounded version/descriptor queries; the parameter
 cannot change after loading. Slot 1 only, timeout/unmatched responses terminal.
+Malformed descriptor counts, lengths or slot IDs also poison the mailbox under
+the query lock, before another caller can issue a query. The mailbox harness
+checks these failures, acknowledgement ordering and refusal of later queries.
 It does not replace the existing SPI HID ALS sensor. Snapshot opens retain a
 private copy after device removal. The observed firmware was 3.0.1.0.
 
@@ -41,6 +46,8 @@ explicit. Run upstream `platform/pluton/pluton-info.py --help`; typed queries
 the mailbox transport. No raw payload, external channel discovery, TPM, keys or
 firmware update API is exposed. Complete reply bounds and terminal errors are
 validated; Python does not retry uncertain requests.
+The wait harness checks a single clock snapshot, deadline expiry and wraparound;
+it rejects the former two-read implementation that could disable the poll timeout.
 
 PM serializes diagnostics with sleep and rejects suspended/removed-device
 operations. It does not manage firmware power. Close readers before manual

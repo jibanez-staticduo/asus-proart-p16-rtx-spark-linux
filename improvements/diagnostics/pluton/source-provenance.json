@@ -18,5 +18,10 @@
     "no ACPI modalias or automatic loading",
     "manual module parameters, no private kernel marker dependency"
   ],
-  "oem_binaries_distributed": false
+  "oem_binaries_distributed": false,
+  "review_followup": {
+    "repository": "https://github.com/jibanez-staticduo/omarchy-pkgs",
+    "commit": "35b3a1c7fe90f7bfe35d443770a29b723206a913",
+    "change": "Snapshot jiffies once for a bounded poll timeout; remove unreachable raw-channel ioctl code"
+  }
 }

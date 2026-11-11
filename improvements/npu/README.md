@@ -101,3 +101,13 @@ Reviewable distribution examples: [provider PR2395](https://github.com/omacom/om
 [local firmware PR2396](https://github.com/omacom/omarchy-pkgs/pull/2396), and
 [runtime PR2397](https://github.com/omacom/omarchy-pkgs/pull/2397). The
 examples are not prerequisites for a different Linux distribution.
+
+## Portable safety tests
+
+From `improvements/npu/provider`, run `python3 test_control.py` and
+`python3 test_control.py --mutations`. They exercise the actual lifecycle helper
+against private sysfs fixtures, including isolated groups, validation before
+domain writes, partial bindings and checked shutdown before unload.
+From `improvements/npu/firmware`, run `python3 test_prepare.py` for synthetic PE
+extraction, hash checks, private output permissions, no-overwrite and race checks,
+including negative controls. No vendor binaries or hardware are used.

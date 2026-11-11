@@ -10,5 +10,10 @@
     "no ACPI modalias or automatic loading",
     "manual module parameters, no private kernel marker dependency"
   ],
-  "oem_binaries_distributed": false
+  "oem_binaries_distributed": false,
+  "review_followup": {
+    "repository": "https://github.com/jibanez-staticduo/omarchy-pkgs",
+    "commit": "0235b0ed9782cfd672723e0d4c603c769bff4512",
+    "change": "Poison malformed descriptor replies under the query lock"
+  }
 }

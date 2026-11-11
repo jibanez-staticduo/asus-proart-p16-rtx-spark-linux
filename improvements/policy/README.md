@@ -11,6 +11,7 @@ UPower configuration override mechanism (`/etc/UPower/UPower.conf.d/` on the
 validated UPower), restart UPower deliberately, then run
 `python3 verify-critical-action.py`. It reads the daemon's GetCriticalAction
 D-Bus method and succeeds only for PowerOff. No power action is triggered.
-The verifier tests use a simulated busctl. Package installation and service
+Run `python3 test_verify_critical_action.py` in this directory. The verifier
+tests use a simulated busctl and check the complete D-Bus command. Package installation and service
 restart are intentionally not automated here. Local running-daemon verification
 succeeded; battery depletion/forced shutdown was not tested.
